@@ -1047,3 +1047,12 @@ body.is-playing .masthead { display: none; }
 @keyframes hint-rotate { 0%, 30% { transform: rotate(0); } 55%, 85% { transform: rotate(-90deg); } 100% { transform: rotate(0); } }
 .rotate-hint__close { flex: none; width: 44px; height: 44px; border: 2px solid var(--paper); background: transparent; color: var(--paper); font-size: 16px; }
 @media (prefers-reduced-motion: reduce) { .rotate-hint__icon { animation: none; } }
+
+/* ---------- no rubber-band bounce (iOS / iPadOS, Android) ---------- */
+/* the page itself never springs past its edges */
+html, body { overscroll-behavior: none; }
+/* inner scrollers keep their scroll to themselves (no bounce, no scroll chaining to the page) */
+.team, .col__list, .log, .saves__card, .result__card { overscroll-behavior: contain; }
+/* the match is one fixed screen: lock the document so nothing can be dragged */
+html:has(body.is-playing) { height: 100%; overflow: hidden; }
+body.is-playing { position: fixed; inset: 0; width: 100%; }
