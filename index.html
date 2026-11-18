@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Matchday Cards</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Anton&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+KR:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="masthead">
+    <h1>Matchday<span>Cards</span></h1>
+    <p class="masthead__lede">카드를 골라 두 팀의 스쿼드를 짜고, 킥오프를 누르면 90분 경기를 시뮬레이션합니다.</p>
+  </header>
+
+  <!-- DRAFT: one team at a time -->
+  <main id="draft" class="screen screen--draft">
+    <nav class="steps" id="steps" aria-label="진행 단계"></nav>
+    <div class="board">
+      <section class="team" id="team"></section>
+      <section class="pool">
+        <div class="pool__bar">
+          <p class="pool__tip" id="pool-tip"></p>
+          <input id="search" type="search" placeholder="이름 검색 (한글/영문)">
+        </div>
+        <div class="pool__cols" id="pool"></div>
+      </section>
+    </div>
+  </main>
+
+  <!-- MATCH -->
+  <main id="match" class="screen" hidden>
+    <section class="scoreboard">
+      <div class="sb__team sb__team--home"><i></i><span id="sb-home-name"></span></div>
+      <div class="sb__score"><span id="sb-home">0</span><b>:</b><span id="sb-away">0</span></div>
+      <div class="sb__team sb__team--away"><span id="sb-away-name"></span><i></i></div>
+      <div class="sb__clock" id="clock">0'</div>
+    </section>
+
+    <section class="stage">
+      <div class="pitch" id="pitch">
+        <div class="pitch__lines">
+          <span class="l-half"></span><span class="l-circle"></span><span class="l-spot"></span>
+          <span class="l-box l-box--l"></span><span class="l-box l-box--r"></span>
+          <span class="l-six l-six--l"></span><span class="l-six l-six--r"></span>
+          <span class="goal goal--l"></span><span class="goal goal--r"></span>
+        </div>
+        <div id="tokens"></div>
+        <div class="ball-shadow" id="ball-shadow"></div>
+        <div class="ball" id="ball"></div>
+        <div class="banner" id="banner"></div>
+      </div>
+
+      <aside class="feed">
+        <div class="controls">
+          <span>속도</span>
+          <button data-speed="1" class="is-on">1×</button>
+          <button data-speed="2">2×</button>
+          <button data-speed="4">4×</button>
+          <button id="skip" class="btn--ghost">결과 보기 ▸▸</button>
+        </div>
+        <ol class="log" id="log"></ol>
+      </aside>
+    </section>
+
+    <div class="result" id="result" hidden>
+      <div class="result__card">
+        <p class="result__kicker">Full Time</p>
+        <div class="result__score" id="res-score"></div>
+        <div class="result__scorers" id="res-scorers"></div>
+        <table class="result__stats" id="res-stats"></table>
+        <div class="result__actions">
+          <button class="btn" id="rematch">다시 시뮬레이션</button>
+          <button class="btn btn--ghost" id="back">스쿼드 수정</button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script src="js/players.js"></script>
+  <script src="js/formations.js"></script>
+  <script src="js/photos.js"></script>
+  <script src="js/sim.js"></script>
+  <script src="js/match.js"></script>
+  <script src="js/draft.js"></script>
+</body>
+</html>
