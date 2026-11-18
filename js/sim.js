@@ -64,6 +64,14 @@
     return line.reduce((s, e) => s + eff(e, 'def'), 0) / line.length;
   }
 
+  // Success / accuracy modifiers per pass and shot type.
+  const PASS_MOD = { short: 0.03, through: -0.08, long: -0.1, switch: -0.06, cross: -0.12, punt: -0.2 };
+  const SHOT_MOD = {
+    shot: { on: 0.06, goal: 0.06 },
+    long: { on: -0.1, goal: -0.12 },
+    header: { on: -0.02, goal: 0.02 },
+  };
+
   function newStats() {
     return { passes: 0, completed: 0, shots: 0, onTarget: 0, goals: 0 };
   }
@@ -79,9 +87,10 @@
     let side = 'home';
     let holder = kickoffTaker(home);
     let lastPasser = null;
+    let fromCross = false;
 
     const restart = (s, idx, type) => {
-      side = s; holder = idx; lastPasser = null;
+      side = s; holder = idx; lastPasser = null; fromCross = false;
       events.push({ type, side, holder, minute: Math.floor(minute) });
     };
 
@@ -99,68 +108,93 @@
       const opp = teams[other(side)];
       const h = team[holder];
       const depth = h.slot.x;
+      const isGK = h.slot.role === 'GK';
 
       // --- Shot decision -------------------------------------------------
-      const shootChance = depth >= 70 ? 0.24 : depth >= 55 ? 0.04 : 0;
-      if (rng() < shootChance) {
+      // kinds: 'shot' (inside the box), 'long' (from distance), 'header' (after a cross)
+      let shotKind = null;
+      if (fromCross) { if (rng() < 0.45) shotKind = 'header'; }
+      else if (depth >= 70) { if (rng() < 0.22) shotKind = 'shot'; }
+      else if (depth >= 40 && (h.slot.role === 'MID' || h.slot.role === 'FWD')) { if (rng() < 0.05) shotKind = 'long'; }
+      fromCross = false;
+
+      if (shotKind) {
         minute += 0.4;
         const st = stats[side];
         st.shots++;
+        const mod = SHOT_MOD[shotKind];
         const att = eff(h, 'att');
         const gkIdx = indexOfRole(opp, 'GK');
         const gk = gkIdx >= 0 ? eff(opp[gkIdx], 'def') : 40;
-        const range = depth >= 70 ? 0.06 : -0.08;
-        const onTarget = rng() < clamp(0.28 + (att - 70) / 90 + range, 0.15, 0.6);
-        const base = { side, from: holder, minute: Math.floor(minute), aimY: 38 + rng() * 24 };
+        const onTarget = rng() < clamp(0.28 + (att - 70) / 90 + mod.on, 0.12, 0.6);
+        const base = { side, from: holder, kind: shotKind, minute: Math.floor(minute), aimY: 38 + rng() * 24 };
 
         if (!onTarget) {
-          events.push({ ...base, type: 'miss', aimY: rng() < 0.5 ? 30 + rng() * 8 : 62 + rng() * 8 });
+          // wide of a post, or over the bar
+          const over = rng() < (shotKind === 'shot' ? 0.3 : 0.5);
+          const aimY = over ? 40 + rng() * 20 : rng() < 0.5 ? 30 + rng() * 7 : 63 + rng() * 7;
+          events.push({ ...base, type: 'miss', aimY, over });
           restart(other(side), Math.max(0, gkIdx), 'goalkick');
           continue;
         }
         st.onTarget++;
-        const pGoal = clamp(0.24 + (att - gk) / 120 + range, 0.08, 0.45);
+        const pGoal = clamp(0.24 + (att - gk) / 120 + mod.goal, 0.05, 0.45);
         if (rng() < pGoal) {
           st.goals++;
           score[side]++;
           events.push({ ...base, type: 'goal', assist: lastPasser, score: { ...score } });
           restart(other(side), kickoffTaker(opp), 'kickoff');
         } else {
-          events.push({ ...base, type: 'save', keeper: gkIdx });
+          events.push({ ...base, type: 'save', keeper: gkIdx, caught: rng() < 0.55 });
           restart(other(side), Math.max(0, gkIdx), 'gkball');
         }
         continue;
       }
 
       // --- Pass ------------------------------------------------------------
+      const wide = Math.abs(h.slot.y - 50) >= 28 && depth >= 55;
+      const goLong = isGK && rng() < 0.55; // keepers often launch it
       const candidates = team
         .map((e, i) => ({ e, i }))
-        .filter((o) => o.i !== holder && o.e.slot.role !== 'GK');
+        .filter((o) => o.i !== holder && o.e.slot.role !== 'GK')
+        .filter((o) => !goLong || o.e.slot.x >= 40);
       const target = pickWeighted(rng, candidates, (o) => {
         const forward = o.e.slot.x - depth;
         const dist = Math.hypot(forward, o.e.slot.y - h.slot.y);
         const progress = forward > -5 ? 1 + forward / 18 : 0.35;
-        const reach = dist > 50 ? 0.25 : 1;
-        return Math.max(0.05, progress * reach);
+        const reach = dist > 50 && !goLong ? 0.25 : 1;
+        const boxBias = wide && o.e.slot.role === 'FWD' ? 2 : 1;
+        return Math.max(0.05, progress * reach * boxBias);
       });
 
+      const t = target.e.slot;
+      const dx = t.x - depth;
+      const dy = t.y - h.slot.y;
+      const dist = Math.hypot(dx, dy);
+      let kind = 'short';
+      if (isGK) kind = goLong ? 'punt' : 'short';
+      else if (wide && t.x >= 65 && Math.abs(t.y - 50) < 30 && rng() < 0.5) kind = 'cross';
+      else if (Math.abs(dy) >= 55 && dist >= 50 && rng() < 0.5) kind = 'switch';
+      else if (dx >= 30 && dist >= 38 && rng() < 0.6) kind = 'long';
+      else if (dx >= 10 && t.x >= 55 && rng() < 0.4) kind = 'through';
+
       const passer = eff(h, 'pas');
-      const press = pressure(opp, target.e.slot.x);
-      const long = target.e.slot.x - depth > 30 ? 0.1 : 0;
-      const final3 = target.e.slot.x >= 60 ? 0.1 : 0;
-      const pSuccess = clamp(0.82 + (passer - press) / 140 - long - final3, 0.5, 0.95);
+      const press = pressure(opp, t.x);
+      const final3 = t.x >= 60 && kind !== 'cross' ? 0.1 : 0;
+      const pSuccess = clamp(0.82 + (passer - press) / 140 + PASS_MOD[kind] - final3, 0.4, 0.95);
 
       stats[side].passes++;
-      minute += 0.28 + rng() * 0.22;
+      minute += 0.28 + rng() * 0.22 + (kind === 'short' || kind === 'through' ? 0 : 0.1);
 
       if (rng() < pSuccess) {
         stats[side].completed++;
-        events.push({ type: 'pass', side, from: holder, to: target.i, minute: Math.floor(minute) });
+        events.push({ type: 'pass', kind, side, from: holder, to: target.i, minute: Math.floor(minute) });
         lastPasser = holder;
         holder = target.i;
+        fromCross = kind === 'cross';
       } else {
-        const by = nearestOpponent(opp, target.e.slot.x, target.e.slot.y);
-        events.push({ type: 'intercept', side, from: holder, to: target.i, by, minute: Math.floor(minute) });
+        const by = nearestOpponent(opp, t.x, t.y);
+        events.push({ type: 'intercept', kind, side, from: holder, to: target.i, by, minute: Math.floor(minute) });
         side = other(side);
         holder = by;
         lastPasser = null;

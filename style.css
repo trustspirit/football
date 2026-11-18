@@ -435,6 +435,11 @@ button { cursor: pointer; }
 }
 .token--home em { background: var(--home); }
 .token--away em { background: var(--away); }
+.token .photo { transition: transform 0.18s ease-out; }
+.token.has-ball { z-index: 3; }
+.token.has-ball .photo { box-shadow: 0 0 0 2.5px #fff, 0 0 0 5px var(--ink); }
+.token.is-dive-r .photo { transform: rotate(75deg) translateX(4px); }
+.token.is-dive-l .photo { transform: rotate(-75deg) translateX(-4px); }
 
 .ball, .ball-shadow { position: absolute; left: 50%; top: 50%; pointer-events: none; will-change: left, top, transform; }
 .ball {
