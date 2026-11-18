@@ -330,18 +330,18 @@
     restart('home', kickoffTaker('home'), 'kickoff');
 
     while (minute < 90) {
-      if (!secondHalf && minute >= 45) {
-        secondHalf = true;
-        minute = 45;
-        setPiece = null;
-        events.push({ type: 'half', minute: 45 });
-        restart('away', kickoffTaker('away'), 'kickoff');
-      }
+      // a free kick / penalty / corner already awarded is always taken, even on the whistle
       if (setPiece) {
         const sp = setPiece;
         setPiece = null;
         playSetPiece(sp);
         continue;
+      }
+      if (!secondHalf && minute >= 45) {
+        secondHalf = true;
+        minute = 45;
+        events.push({ type: 'half', minute: 45 });
+        restart('away', kickoffTaker('away'), 'kickoff');
       }
 
       const oppSide = other(side);
@@ -438,6 +438,7 @@
       }
     }
 
+    if (setPiece) { const sp = setPiece; setPiece = null; playSetPiece(sp); }
     events.push({ type: 'end', minute: 90, score: { ...score } });
     return { events, score, stats, seed, sentOff: { home: [...T.home.off], away: [...T.away.off] } };
   }

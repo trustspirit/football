@@ -846,3 +846,9 @@ body.is-playing .masthead { display: none; }
   .slot .photo { width: 34px; height: 34px; }
   .slot em { font-size: 10px; }
 }
+
+@media (prefers-reduced-motion: reduce) {
+  .pitch.is-goal, .slot--empty.is-target, .log li, .token.is-booked .photo, .token.is-jump .photo { animation: none !important; }
+  .card-show.is-on { animation: none; opacity: 1; transform: translate(-50%, -50%); }
+  .card-show.is-on i { animation: none; }
+}

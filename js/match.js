@@ -55,9 +55,12 @@
   let timers = [];
 
   // ---------- time ----------
+  // Sim-time wait. A wait requested by a match that has since been stopped never resolves,
+  // so an old playback chain quietly ends instead of touching the new match.
   function simWait(sec) {
-    if (skipping) return Promise.resolve();
-    return new Promise((resolve) => timers.push({ at: simT + sec, resolve }));
+    const run = runId;
+    if (skipping) return run === runId ? Promise.resolve() : new Promise(() => {});
+    return new Promise((resolve) => timers.push({ at: simT + sec, resolve, run }));
   }
 
   // ---------- team shape ----------
@@ -365,7 +368,7 @@
       stepRef(dt);
       stepBall(dt);
     }
-    const due = timers.filter((t) => t.at <= simT);
+    const due = timers.filter((t) => t.at <= simT && t.run === runId);
     timers = timers.filter((t) => t.at > simT);
     due.forEach((t) => t.resolve());
     draw();
@@ -417,7 +420,9 @@
     show.className = 'card-show is-on card-show--' + kind;
     show.querySelector('b').textContent = kind === 'yellow' ? 'YELLOW CARD' : 'RED CARD';
     show.querySelector('small').textContent = `${o.side === 'home' ? teams.home.name : teams.away.name} · ${playerOf(o.side, o.i).ko}`;
+    const run = runId;
     return new Promise((resolve) => setTimeout(() => {
+      if (run !== runId) return;
       show.className = 'card-show';
       card.className = 'ref-card';
       ref.el.classList.remove('is-showing');
@@ -609,7 +614,7 @@
     }
   }
 
-  async function doShot(ev) {
+  async function doShot(ev, next) {
     const S = ev.side;
     const shK = key(S, ev.from);
     const gkK = ev.keeper !== undefined ? key(other(S), ev.keeper) : gkKey(other(S));
@@ -641,17 +646,21 @@
 
     const reach = ev.type === 'save' ? 1 : ev.type === 'goal' ? rand(0.4, 0.75) : 0.3;
     const diveY = gk.p.y + (gy - gk.p.y) * reach;
-    setTimeout(() => {
-      gk.ov = { t: { x: lineX - dirOf(S) * 1.2, y: diveY }, spd: 10, acc: 40 };
-      if (Math.abs(gy - gk.p.y) > 1.2 && ev.type !== 'miss') gk.el.classList.add(gy > gk.p.y ? 'is-dive-r' : 'is-dive-l');
-    }, skipping ? 0 : 120 / speed);
+    const run = runId;
+    if (!skipping) {
+      setTimeout(() => {
+        if (run !== runId || skipping) return;
+        gk.ov = { t: { x: lineX - dirOf(S) * 1.2, y: diveY }, spd: 10, acc: 40 };
+        if (Math.abs(gy - gk.p.y) > 1.2 && ev.type !== 'miss') gk.el.classList.add(gy > gk.p.y ? 'is-dive-r' : 'is-dive-l');
+      }, 120 / speed);
+    }
 
     if (ev.type === 'save') {
       const hands = { x: lineX - dirOf(S) * 1.2, y: diveY };
       await kick(hands, { ...opts, h1: rand(0.3, 1.6), then: { mode: ev.caught ? 'held' : 'dead', holder: gkK } });
       if (!ev.caught && !skipping) {
         // parried: either out for a corner, or loose and gathered
-        const toCorner = Math.random() < 0.5;
+        const toCorner = !!(next && next.type === 'corner');
         const loose = toCorner
           ? { x: lineX + dirOf(S) * 2, y: hands.y < H / 2 ? rand(18, 26) : rand(42, 50) }
           : inPitch({ x: lineX - dirOf(S) * rand(4, 8), y: hands.y + (Math.random() < 0.5 ? -1 : 1) * rand(4, 9) }, 2);
@@ -750,8 +759,12 @@
       if (ev.x < 55) { live.setPiece = null; Object.values(agents).forEach((o) => { o.spot = null; }); }
     }
     // the wall jumps as the ball is struck
-    wall.forEach((o) => o.el.classList.add('is-jump'));
-    setTimeout(() => wall.forEach((o) => { o.el.classList.remove('is-jump'); o.ov = null; }), skipping ? 0 : 700 / speed);
+    const endJump = () => wall.forEach((o) => { o.el.classList.remove('is-jump'); o.ov = null; });
+    if (skipping) endJump();
+    else {
+      wall.forEach((o) => o.el.classList.add('is-jump'));
+      setTimeout(endJump, 700 / speed);
+    }
   }
 
   async function doPenalty(ev) {
@@ -890,7 +903,7 @@
         return undefined;
       }
       case 'save':
-        await doShot(ev);
+        await doShot(ev, next);
         log(ev.minute, `${name(ev.side, ev.from)}의 ${SHOT_KO[ev.kind]} — ${name(other(ev.side), ev.keeper)} ${ev.caught ? '캐치' : '선방'}`, ev.side);
         banner('SAVE!');
         return simWait(0.6);
@@ -921,13 +934,25 @@
     const evs = result.events;
     for (let n = 0; n < evs.length; n++) {
       if (id !== runId) return;
-      await step(evs[n], evs[n + 1]);
+      try {
+        await step(evs[n], evs[n + 1]);
+      } catch (err) {
+        // never leave the user stuck mid-match: jump to the final whistle
+        console.error('playback error at event', n, evs[n], err);
+        skipping = true;
+      }
     }
     if (id === runId) showResult();
   }
 
   // ---------- result ----------
   function showResult() {
+    // settle the pitch behind the overlay and stop the animation loop (saves battery on tablets)
+    clearOverrides();
+    live.celebrate = null;
+    Object.assign(ball, { mode: 'dead', holder: null, fl: null, alpha: 1, h: 0 });
+    draw();
+    rafGen++;
     const { stats, events } = result;
     const totalPasses = stats.home.passes + stats.away.passes || 1;
     const goals = events.filter((e) => e.type === 'goal');
@@ -969,6 +994,7 @@
       table.append(tr);
     });
     $('#result').hidden = false;
+    $('#rematch').focus({ preventScroll: true });
   }
 
   // ---------- setup ----------
@@ -1042,7 +1068,6 @@
   function stop() {
     runId++;
     rafGen++;
-    timers.forEach((t) => t.resolve());
     timers = [];
   }
 

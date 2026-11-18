@@ -100,10 +100,23 @@
   }
 
   // ---------- saved squads (localStorage, 6 slots) ----------
+  // Saved data comes from storage and may be stale (players removed) or hand-edited, so
+  // every slot is sanitised: unknown ids become empty slots, unknown tactics fall back.
+  function sanitize(s) {
+    if (!s || typeof s !== 'object' || !FORMATIONS[s.formation] || !Array.isArray(s.slots)) return null;
+    const slots = Array.from({ length: 11 }, (_, i) => (PLAYER_BY_ID[s.slots[i]] ? s.slots[i] : null));
+    const seen = new Set();
+    slots.forEach((id, i) => { if (id && seen.has(id)) slots[i] = null; else if (id) seen.add(id); });
+    const tactic = { ...Sim.TACTIC_DEFAULT };
+    Object.keys(TACTIC_OPTIONS).forEach((k) => {
+      if (s.tactic && TACTIC_OPTIONS[k].options[s.tactic[k]]) tactic[k] = s.tactic[k];
+    });
+    return { name: String(s.name || 'Team').slice(0, 18), formation: s.formation, slots, tactic, savedAt: +s.savedAt || Date.now() };
+  }
   function readSaves() {
     try {
       const arr = JSON.parse(localStorage.getItem(SAVE_KEY) || '[]');
-      return Array.from({ length: SAVE_SLOTS }, (_, i) => arr[i] || null);
+      return Array.from({ length: SAVE_SLOTS }, (_, i) => sanitize(Array.isArray(arr) ? arr[i] : null));
     } catch (_) {
       return Array(SAVE_SLOTS).fill(null);
     }
@@ -125,9 +138,8 @@
     const t = current();
     t.name = s.name;
     t.formation = s.formation;
-    t.slots = s.slots.map((id) => (id && PLAYER_BY_ID[id] ? id : null)).slice(0, 11);
-    while (t.slots.length < 11) t.slots.push(null);
-    t.tactic = { ...Sim.TACTIC_DEFAULT, ...s.tactic };
+    t.slots = [...s.slots];
+    t.tactic = { ...s.tactic };
     state.targetSlot = null;
     closeSaves();
     render();
@@ -277,6 +289,14 @@
     }).join('');
   }
 
+  function tipText() {
+    const team = current();
+    const found = state.query ? PLAYERS.filter(matches).length : null;
+    if (state.targetSlot !== null) return `${ROLE_KO[FORMATIONS[team.formation][state.targetSlot].role]} 자리에 넣을 선수를 고르세요 — 포지션 상관없이 어떤 카드든 가능해요.`;
+    if (found !== null) return `"${state.query}" 검색 결과 ${found}명`;
+    return `${team.name} 구성 중 — 카드를 탭하거나, 피치의 원하는 자리로 끌어다 놓으세요.`;
+  }
+
   function render() {
     $('#steps').innerHTML = stepsHTML();
     const teamEl = $('#team');
@@ -288,14 +308,8 @@
     $('#pool').innerHTML = poolHTML();
     document.querySelectorAll('.col').forEach((c) => { $('.col__list', c).scrollTop = scroll[c.dataset.role] || 0; });
 
-    const team = current();
-    const found = state.query ? PLAYERS.filter(matches).length : null;
-    let tip;
-    if (state.targetSlot !== null) tip = `${ROLE_KO[FORMATIONS[team.formation][state.targetSlot].role]} 자리에 넣을 선수를 고르세요 — 포지션 상관없이 어떤 카드든 가능해요.`;
-    else if (found !== null) tip = `"${state.query}" 검색 결과 ${found}명`;
-    else tip = `${team.name} 구성 중 — 카드를 탭하거나, 피치의 원하는 자리로 끌어다 놓으세요.`;
     const tipEl = $('#pool-tip');
-    if (!tipEl.classList.contains('is-warn')) tipEl.textContent = tip;
+    if (!tipEl.classList.contains('is-warn')) tipEl.textContent = tipText();
   }
 
   let tipTimer;
@@ -304,7 +318,7 @@
     el.textContent = msg;
     el.classList.add('is-warn');
     clearTimeout(tipTimer);
-    tipTimer = setTimeout(() => { el.classList.remove('is-warn'); render(); }, 2200);
+    tipTimer = setTimeout(() => { el.classList.remove('is-warn'); el.textContent = tipText(); }, 2200);
   }
 
   function kickoff() {
@@ -326,8 +340,15 @@
   });
 
   const teamEl = $('#team');
+  // capture phase: runs before the panel/pool handlers, eats one post-drag click
+  document.addEventListener('click', (e) => {
+    if (!drag.suppressClick) return;
+    drag.suppressClick = false;
+    e.stopPropagation();
+    e.preventDefault();
+  }, true);
+
   teamEl.addEventListener('click', (e) => {
-    if (drag.suppressClick) return;
     const slotBtn = e.target.closest('.slot');
     const act = e.target.closest('[data-act]');
     if (slotBtn) {
@@ -359,7 +380,6 @@
   });
 
   $('#pool').addEventListener('click', (e) => {
-    if (drag.suppressClick) return;
     const card = e.target.closest('.pc');
     if (card) pickCard(card.dataset.id);
   });
@@ -385,6 +405,7 @@
     return el && el.closest('#team .slot');
   }
   function beginDrag(e) {
+    if (drag.ghost) drag.ghost.remove();
     drag.active = true;
     const src = drag.src;
     const ghost = document.createElement('div');
@@ -399,7 +420,16 @@
     drag.ghost = ghost;
     teamEl.classList.add('is-dragging');
     moveGhost(e.clientX, e.clientY);
+    requestAnimationFrame(autoScroll);
     if (navigator.vibrate) { try { navigator.vibrate(10); } catch (_) { /* ignore */ } }
+  }
+  function autoScroll() {
+    if (!drag.active || !drag.last) return;
+    const edge = 70;
+    const y = drag.last.y;
+    const dy = y < edge ? -(edge - y) / 3 : y > innerHeight - edge ? (y - (innerHeight - edge)) / 3 : 0;
+    if (dy) { window.scrollBy(0, dy); moveGhost(drag.last.x, drag.last.y); }
+    requestAnimationFrame(autoScroll);
   }
   function moveGhost(x, y) {
     drag.last = { x, y };
@@ -421,9 +451,9 @@
       state.targetSlot = null;
     }
     if (drag.active) {
-      // swallow the click that follows a drag
+      // swallow the click that follows a drag (whenever the browser delivers it)
       drag.suppressClick = true;
-      setTimeout(() => { drag.suppressClick = false; }, 0);
+      setTimeout(() => { drag.suppressClick = false; }, 400);
     }
     cleanupDrag();
     if (over) render();
@@ -481,6 +511,8 @@
   document.addEventListener('touchend', () => {
     if (drag.active && drag.last) endDrag(drag.last.x, drag.last.y);
   });
+  // system gesture / interruption: drop the drag without placing anything
+  document.addEventListener('touchcancel', () => { if (drag.src) cleanupDrag(); });
 
   // ---------- search ----------
   const search = $('#search');

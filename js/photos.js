@@ -36,7 +36,7 @@
     players.forEach((p) => { if (p.commons) cache[p.id] = commonsUrl(p.commons); });
     const missing = players.filter((p) => !(p.id in cache));
     for (let i = 0; i < missing.length; i += 50) {
-      try { await fetchChunk(missing.slice(i, i + 50)); } catch (_) { return false; }
+      try { await fetchChunk(missing.slice(i, i + 50)); } catch (_) { save(); return i > 0; }
     }
     save();
     return missing.length > 0;
@@ -49,7 +49,8 @@
   function html(player, cls) {
     const src = cache[player.id];
     const inner = src
-      ? `<img src="${src}" alt="${player.name}" loading="lazy" referrerpolicy="no-referrer" onerror="this.replaceWith(document.createTextNode('${initials(player.name)}'))">`
+      // upload.wikimedia.org sends CORS headers -> a cacheable (non-opaque) response for the service worker
+      ? `<img src="${src}" alt="${player.name}"${src.includes('upload.wikimedia.org') ? ' crossorigin="anonymous"' : ''} loading="lazy" referrerpolicy="no-referrer" onerror="this.replaceWith(document.createTextNode('${initials(player.name)}'))">`
       : initials(player.name);
     return `<span class="photo ${cls || ''}">${inner}</span>`;
   }

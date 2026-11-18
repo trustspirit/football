@@ -1,5 +1,5 @@
 // Service worker: offline app shell + cached player photos and fonts.
-const VERSION = 'mdc-v4';
+const VERSION = 'mdc-v5';
 const SHELL = [
   './', 'index.html', 'style.css', 'manifest.webmanifest',
   'js/players.js', 'js/formations.js', 'js/photos.js', 'js/sim.js', 'js/match.js', 'js/draft.js',
@@ -24,15 +24,20 @@ self.addEventListener('fetch', (e) => {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
 
-  // App shell: network first (so updates land), fall back to cache offline.
+  // App shell: network first (so updates land), but fall back to the cache after 3 s
+  // on a weak connection, and when offline.
   if (url.origin === self.location.origin) {
+    const network = fetch(req).then((res) => {
+      if (res.ok) { const copy = res.clone(); caches.open(VERSION).then((c) => c.put(req, copy)); }
+      return res;
+    });
+    const hit = () => caches.match(req, { ignoreSearch: true });
+    const offline = () => hit().then((r) => r || (req.mode === 'navigate' ? caches.match('index.html') : Response.error()));
+    const slow = new Promise((resolve) => setTimeout(resolve, 3000)).then(hit);
     e.respondWith(
-      fetch(req)
-        .then((res) => {
-          if (res.ok) { const copy = res.clone(); caches.open(VERSION).then((c) => c.put(req, copy)); }
-          return res;
-        })
-        .catch(() => caches.match(req, { ignoreSearch: true }).then((r) => r || caches.match('index.html'))),
+      Promise.race([network, slow])
+        .then((res) => res || network) // timed out but nothing cached: keep waiting for the network
+        .catch(offline),
     );
     return;
   }
@@ -42,7 +47,7 @@ self.addEventListener('fetch', (e) => {
     if (url.pathname.endsWith('/api.php')) return; // photo lookups: always live (results are cached in localStorage)
     e.respondWith(
       caches.open(RUNTIME).then((cache) => cache.match(req).then((hit) => hit || fetch(req).then((res) => {
-        if (res.ok || res.type === 'opaque') cache.put(req, res.clone());
+        if (res.ok) cache.put(req, res.clone()).catch(() => {}); // opaque responses are not cached (quota padding, hidden errors)
         return res;
       }))),
     );

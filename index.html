@@ -76,7 +76,7 @@
           <div class="ball-trail" id="ball-trail"></div>
           <div class="ball-shadow" id="ball-shadow"></div>
           <div class="ball" id="ball"></div>
-          <div class="banner" id="banner"></div>
+          <div class="banner" id="banner" aria-hidden="true"></div>
           <div class="card-show" id="card-show" aria-live="polite"><i></i><span><b></b><small></small></span></div>
         </div>
       </div>
@@ -90,11 +90,11 @@
           <button id="skip" class="ctl-link">결과 ▸▸</button>
           <button id="exit" class="ctl-link" aria-label="스쿼드로 돌아가기">나가기</button>
         </div>
-        <ol class="log" id="log"></ol>
+        <ol class="log" id="log" aria-live="polite" aria-label="문자 중계"></ol>
       </aside>
     </section>
 
-    <div class="result" id="result" hidden>
+    <div class="result" id="result" role="dialog" aria-modal="true" aria-label="경기 결과" hidden>
       <div class="result__card">
         <p class="result__kicker">Full Time</p>
         <div class="result__score" id="res-score"></div>

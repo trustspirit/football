@@ -108,3 +108,13 @@ test('tactics are accepted and change the match', () => {
   const b = simulate(strong, weaker, 5, { home: { mentality: 'attacking', style: 'possession', press: 'high' } });
   assert.notDeepEqual(a.events, b.events);
 });
+
+test('every foul is followed by its free kick or penalty, and throw-ins by a throw', () => {
+  for (let s = 1; s <= 150; s++) {
+    const ev = simulate(strong, weaker, s).events;
+    ev.forEach((e, i) => {
+      if (e.type === 'foul') assert.ok(['freekick', 'penalty'].includes(ev[i + 1].type), `seed ${s}: foul then ${ev[i + 1].type}`);
+      if (e.type === 'throwin') assert.equal(ev[i + 1].kind, 'throw', `seed ${s}`);
+    });
+  }
+});
