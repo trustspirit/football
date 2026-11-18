@@ -59,3 +59,52 @@ test('players can be placed out of position (same player allowed on both teams)'
   const r = simulate(allForwards, allForwards, 3);
   assert.equal(r.events.at(-1).type, 'end');
 });
+
+test('every player has pace / physical / kicking skills in range', () => {
+  for (const p of global.PLAYERS) {
+    for (const k of ['pac', 'phy', 'fk']) assert.ok(p[k] >= 30 && p[k] <= 99, `${p.id}.${k}=${p[k]}`);
+  }
+});
+
+test('fouls, cards and set pieces happen at realistic rates', () => {
+  const n = 200;
+  const t = { fouls: 0, yellows: 0, reds: 0, corners: 0, freekicks: 0, penalties: 0 };
+  for (let s = 1; s <= n; s++) {
+    const r = simulate(strong, weaker, s);
+    for (const side of ['home', 'away']) for (const k of Object.keys(t)) t[k] += r.stats[side][k];
+  }
+  const per = (k) => t[k] / n;
+  assert.ok(per('fouls') > 6 && per('fouls') < 30, `fouls ${per('fouls')}`);
+  assert.ok(per('yellows') > 1 && per('yellows') < 7, `yellows ${per('yellows')}`);
+  assert.ok(per('reds') < 1, `reds ${per('reds')}`);
+  assert.ok(per('corners') > 3 && per('corners') < 14, `corners ${per('corners')}`);
+  assert.ok(per('penalties') > 0.05 && per('penalties') < 0.8, `penalties ${per('penalties')}`);
+});
+
+test('a sent-off player takes no further part', () => {
+  for (let s = 1; s <= 400; s++) {
+    const r = simulate(strong, weaker, s);
+    const reds = r.events.filter((e) => e.type === 'foul' && (e.card === 'red' || e.card === 'second-yellow'));
+    if (!reds.length) continue;
+    const red = reds[0];
+    const after = r.events.slice(r.events.indexOf(red) + 1);
+    const involved = after.some((e) => e.side === red.side && [e.from, e.to, e.holder].includes(red.by));
+    assert.ok(!involved, `seed ${s}: player ${red.by} acted after a red card`);
+    return;
+  }
+  assert.fail('no red card in 400 matches');
+});
+
+test('every set-piece event is followed by its delivery or shot', () => {
+  const r = simulate(strong, weaker, 11, { home: { mentality: 'attacking', style: 'direct', press: 'high' } });
+  r.events.forEach((e, i) => {
+    if (e.type === 'penalty') assert.equal(r.events[i + 1].kind, 'penalty');
+    if (e.type === 'corner') assert.equal(r.events[i + 1].kind, 'corner');
+  });
+});
+
+test('tactics are accepted and change the match', () => {
+  const a = simulate(strong, weaker, 5);
+  const b = simulate(strong, weaker, 5, { home: { mentality: 'attacking', style: 'possession', press: 'high' } });
+  assert.notDeepEqual(a.events, b.events);
+});

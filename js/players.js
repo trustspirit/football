@@ -294,6 +294,51 @@
     joangarcia: ['조안 가르시아', '조안 가르시아'],
   };
 
+  // Extra skills: [pace, physical (aerial/strength), kicking (set pieces / long-range power)].
+  const SKILLS = {
+    mbappe: [97, 77, 80], haaland: [89, 92, 62], vinicius: [95, 68, 70], kane: [70, 83, 85],
+    salah: [89, 75, 75], yamal: [86, 60, 82], lautaro: [82, 83, 70], messi: [78, 65, 94],
+    ronaldo: [82, 78, 85], son: [87, 70, 82], raphinha: [88, 68, 86], lewandowski: [76, 82, 80],
+    dembele: [92, 63, 78], kvara: [86, 70, 74], saka: [86, 70, 78], alvarez: [84, 74, 80],
+    osimhen: [86, 85, 55], leao: [92, 78, 65], gyokeres: [86, 90, 60], isak: [86, 72, 65],
+    griezmann: [78, 70, 86], neymar: [82, 60, 88], benzema: [76, 80, 75], luisdiaz: [90, 68, 65],
+    nicowilliams: [93, 62, 70], rodrygo: [88, 65, 72], olise: [82, 65, 86], doue: [86, 66, 72],
+    pulisic: [86, 64, 74], hwangheechan: [88, 78, 62], thuram: [86, 86, 62], nunez: [90, 84, 55],
+    cunha: [82, 78, 80], rashford: [91, 76, 82], watkins: [84, 78, 62], martinelli: [90, 68, 68],
+    barcola: [92, 62, 66], yildiz: [84, 68, 80], vlahovic: [76, 88, 84], ekitike: [86, 74, 65],
+    sesko: [87, 88, 70], guirassy: [82, 86, 72], sane: [89, 70, 82], dybala: [75, 60, 90],
+    lukaku: [77, 90, 60], suarez: [64, 74, 82], mbeumo: [86, 72, 82], havertz: [78, 84, 68],
+    mitoma: [88, 62, 65], kubo: [84, 58, 80], ohhyeongyu: [80, 82, 62], semenyo: [89, 82, 72],
+    lookman: [86, 66, 72], bellingham: [80, 82, 75], pedri: [72, 62, 78], rodri: [60, 85, 80],
+    debruyne: [70, 74, 92], musiala: [82, 60, 75], wirtz: [78, 64, 84], valverde: [88, 82, 80],
+    palmer: [72, 68, 86], foden: [80, 60, 82], odegaard: [74, 60, 88], rice: [74, 85, 78],
+    kimmich: [68, 72, 88], bruno: [72, 72, 88], dejong: [75, 72, 70], leekangin: [74, 58, 88],
+    bernardo: [72, 60, 80], modric: [70, 62, 86], vitinha: [74, 62, 82], joaoneves: [78, 70, 72],
+    macallister: [66, 74, 82], enzo: [70, 72, 84], caicedo: [76, 84, 65], barella: [78, 76, 78],
+    olmo: [78, 64, 84], tchouameni: [68, 86, 70], guler: [74, 55, 88], szoboszlai: [80, 78, 88],
+    hwanginbeom: [72, 70, 80], casemiro: [58, 86, 78], guimaraes: [70, 80, 80], xhaka: [60, 80, 88],
+    gundogan: [62, 66, 84], muller: [68, 72, 74], mount: [74, 66, 82], camavinga: [80, 78, 68],
+    paqueta: [74, 74, 84], tonali: [74, 78, 82], calhanoglu: [60, 72, 92], xavisimons: [84, 58, 80],
+    mainoo: [72, 70, 72], rabiot: [72, 82, 74], kante: [78, 80, 62], endo: [66, 80, 68],
+    leejaesung: [74, 72, 78], rogers: [82, 80, 74], vandijk: [78, 92, 70], dias: [60, 88, 60],
+    saliba: [82, 85, 55], hakimi: [92, 75, 78], taa: [72, 70, 92], davies: [95, 72, 65],
+    kimminjae: [82, 90, 55], gvardiol: [80, 84, 68], marquinhos: [74, 80, 62], theo: [92, 82, 78],
+    rudiger: [82, 88, 62], bastoni: [70, 84, 74], kounde: [85, 78, 60], nunomendes: [90, 76, 68],
+    cubarsi: [72, 74, 62], huijsen: [74, 80, 70], araujo: [85, 88, 55], dimarco: [76, 70, 90],
+    konate: [80, 92, 50], gabriel: [72, 90, 58], militao: [84, 85, 65], upamecano: [84, 88, 55],
+    reecejames: [80, 80, 88], walker: [88, 78, 60], stones: [66, 78, 68], robertson: [82, 72, 86],
+    cancelo: [80, 70, 80], frimpong: [94, 68, 70], grimaldo: [82, 62, 90], vandeven: [96, 82, 55],
+    romero: [76, 86, 58], lisandro: [74, 82, 72], deligt: [66, 90, 60], tah: [66, 90, 55],
+    carvajal: [80, 78, 74], cucurella: [78, 74, 70], calafiori: [76, 84, 72], ramos: [66, 84, 80],
+    seolyoungwoo: [80, 72, 70], timber: [82, 76, 65], courtois: [50, 85, 75], alisson: [55, 82, 82],
+    donnarumma: [52, 88, 72], terstegen: [52, 76, 88], emartinez: [50, 84, 76], oblak: [50, 80, 72],
+    maignan: [56, 82, 80], raya: [52, 74, 84], ederson: [58, 82, 92], sommer: [50, 66, 76],
+    unaisimon: [52, 78, 76], johyeonwoo: [52, 70, 70], neuer: [50, 84, 86], szczesny: [48, 80, 74],
+    onana: [56, 78, 82], verbruggen: [54, 80, 80], diogocosta: [54, 80, 80], kobel: [52, 82, 78],
+    pickford: [54, 74, 84], vicario: [52, 72, 74], kimseunggyu: [50, 72, 74], joangarcia: [54, 80, 78],
+  };
+  const SKILL_DEFAULT = { GK: [50, 75, 72], DEF: [74, 80, 62], MID: [72, 70, 74], FWD: [82, 72, 70] };
+
   // Photo overrides for players whose English Wikipedia article has no lead image:
   // a Wikimedia Commons file name, served via Special:FilePath.
   const COMMONS = {
@@ -303,8 +348,9 @@
   window.PLAYERS = raw.map(([id, name, wiki, pos, nat, att, pas, def]) => {
     const [wa, wp, wd] = WEIGHTS[pos];
     const [ko, short] = KO[id] || [name, name.split(' ').slice(-1)[0]];
+    const [pac, phy, fk] = SKILLS[id] || SKILL_DEFAULT[pos];
     return {
-      id, name, ko, short, wiki, pos, nat, att, pas, def,
+      id, name, ko, short, wiki, pos, nat, att, pas, def, pac, phy, fk,
       commons: COMMONS[id] || null,
       ovr: Math.round(att * wa + pas * wp + def * wd),
     };

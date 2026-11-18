@@ -2,9 +2,17 @@
 <html lang="ko">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Matchday Cards</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 100 100%27%3E%3Ctext y=%27.9em%27 font-size=%2790%27%3E⚽%3C/text%3E%3C/svg%3E">
+  <meta name="description" content="축구 선수 카드로 스쿼드를 짜고 90분 경기를 시뮬레이션하는 게임">
+  <meta name="theme-color" content="#151515">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Matchday">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Anton&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+KR:wght@400;600&display=swap" rel="stylesheet">
@@ -24,34 +32,53 @@
       <section class="pool">
         <div class="pool__bar">
           <p class="pool__tip" id="pool-tip"></p>
-          <input id="search" type="search" placeholder="이름 검색 (한글/영문)">
+          <input id="search" type="search" placeholder="이름 검색 (한글/영문)" enterkeyhint="done" autocomplete="off">
         </div>
         <div class="pool__cols" id="pool"></div>
       </section>
     </div>
   </main>
 
-  <!-- MATCH -->
-  <main id="match" class="screen" hidden>
+  <!-- Saved squads -->
+  <div class="saves" id="saves" hidden>
+    <div class="saves__card" role="dialog" aria-modal="true" aria-labelledby="saves-title">
+      <header class="saves__head">
+        <h2 id="saves-title">스쿼드 저장/불러오기</h2>
+        <button class="btn btn--small btn--ghost" data-close aria-label="닫기">닫기 ✕</button>
+      </header>
+      <p class="saves__note">최대 6개까지 이 기기(브라우저)에 저장돼요. 불러오면 지금 편집 중인 팀에 적용됩니다.</p>
+      <ol class="saves__list" id="saves-list"></ol>
+    </div>
+  </div>
+
+  <!-- MATCH: fits in one screen -->
+  <main id="match" class="screen screen--match" hidden>
     <section class="scoreboard">
-      <div class="sb__team sb__team--home"><i></i><span id="sb-home-name"></span></div>
-      <div class="sb__score"><span id="sb-home">0</span><b>:</b><span id="sb-away">0</span></div>
-      <div class="sb__team sb__team--away"><span id="sb-away-name"></span><i></i></div>
-      <div class="sb__clock" id="clock">0'</div>
+      <div class="sb__team sb__team--home"><span class="sb__cards" id="sb-home-cards"></span><span class="sb__name" id="sb-home-name"></span><i></i></div>
+      <div class="sb__mid">
+        <div class="sb__score"><span id="sb-home">0</span><b>:</b><span id="sb-away">0</span></div>
+        <div class="sb__clock" id="clock">0'</div>
+      </div>
+      <div class="sb__team sb__team--away"><i></i><span class="sb__name" id="sb-away-name"></span><span class="sb__cards" id="sb-away-cards"></span></div>
     </section>
 
     <section class="stage">
-      <div class="pitch" id="pitch">
-        <div class="pitch__lines">
-          <span class="l-half"></span><span class="l-circle"></span><span class="l-spot"></span>
-          <span class="l-box l-box--l"></span><span class="l-box l-box--r"></span>
-          <span class="l-six l-six--l"></span><span class="l-six l-six--r"></span>
-          <span class="goal goal--l"></span><span class="goal goal--r"></span>
+      <div class="pitch-wrap">
+        <div class="pitch" id="pitch">
+          <div class="pitch__lines">
+            <span class="l-half"></span><span class="l-circle"></span><span class="l-spot"></span>
+            <span class="l-box l-box--l"></span><span class="l-box l-box--r"></span>
+            <span class="l-six l-six--l"></span><span class="l-six l-six--r"></span>
+            <span class="l-pen l-pen--l"></span><span class="l-pen l-pen--r"></span>
+            <span class="goal goal--l"></span><span class="goal goal--r"></span>
+          </div>
+          <div id="tokens"></div>
+          <div class="ball-trail" id="ball-trail"></div>
+          <div class="ball-shadow" id="ball-shadow"></div>
+          <div class="ball" id="ball"></div>
+          <div class="banner" id="banner"></div>
+          <div class="ref-card" id="ref-card"></div>
         </div>
-        <div id="tokens"></div>
-        <div class="ball-shadow" id="ball-shadow"></div>
-        <div class="ball" id="ball"></div>
-        <div class="banner" id="banner"></div>
       </div>
 
       <aside class="feed">
@@ -60,7 +87,8 @@
           <button data-speed="1" class="is-on">1×</button>
           <button data-speed="2">2×</button>
           <button data-speed="4">4×</button>
-          <button id="skip" class="btn--ghost">결과 보기 ▸▸</button>
+          <button id="skip" class="ctl-link">결과 ▸▸</button>
+          <button id="exit" class="ctl-link" aria-label="스쿼드로 돌아가기">나가기</button>
         </div>
         <ol class="log" id="log"></ol>
       </aside>
@@ -86,5 +114,10 @@
   <script src="js/sim.js"></script>
   <script src="js/match.js"></script>
   <script src="js/draft.js"></script>
+  <script>
+    if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+      window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+    }
+  </script>
 </body>
 </html>

@@ -1,20 +1,30 @@
 // Squad builder: one team at a time (home -> away -> kick-off).
-// Left: the active team's pitch. Right: player cards in GK / DEF / MID / FWD columns.
-// Cards are placed by click (auto slot or targeted slot) or by drag & drop onto a slot.
+// Left: the active team's pitch + tactics. Right: player cards in GK / DEF / MID / FWD columns.
+// Cards are placed by tap (auto slot or targeted slot) or by dragging onto a slot
+// (Pointer Events, so it works with mouse, pen and touch).
+// Squads can be saved to / loaded from 6 local slots.
 (function () {
   const $ = (s, el = document) => el.querySelector(s);
   const esc = (v) => String(v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const ROLES = ['GK', 'DEF', 'MID', 'FWD'];
   const ROLE_KO = { GK: '골키퍼', DEF: '수비수', MID: '미드필더', FWD: '공격수' };
+  const TACTIC_OPTIONS = {
+    mentality: { label: '성향', options: { defensive: '수비적', balanced: '균형', attacking: '공격적' } },
+    style: { label: '스타일', options: { possession: '점유', balanced: '균형', direct: '롱볼·직선적', counter: '역습' } },
+    press: { label: '압박', options: { low: '낮게', mid: '중간', high: '높게' } },
+  };
+  const SAVE_KEY = 'mdc-squads-v1';
+  const SAVE_SLOTS = 6;
+
+  const newTeam = (name, formation) => ({
+    name, formation, slots: Array(11).fill(null), tactic: { ...Sim.TACTIC_DEFAULT },
+  });
 
   const state = {
-    step: 'home',       // which team is being edited
-    targetSlot: null,   // empty slot chosen on the pitch; next card click fills it
+    step: 'home',
+    targetSlot: null,
     query: '',
-    teams: {
-      home: { name: 'Paper FC', formation: '4-3-3', slots: Array(11).fill(null) },
-      away: { name: 'Ink United', formation: '4-4-2', slots: Array(11).fill(null) },
-    },
+    teams: { home: newTeam('Paper FC', '4-3-3'), away: newTeam('Ink United', '4-4-2') },
   };
 
   const current = () => state.teams[state.step];
@@ -24,7 +34,6 @@
   const inTeam = (side, id) => state.teams[side].slots.includes(id);
 
   // ---------- search ----------
-  // Case-, accent- and space-insensitive: "mbappe" finds Mbappé, "반다이크" finds 반 다이크.
   const norm = (v) => v.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[\s.\-']/g, '').toLowerCase();
   PLAYERS.forEach((p) => { p._search = norm([p.name, p.ko, p.short, p.nat].join(' ')); });
   const matches = (p) => !state.query || p._search.includes(norm(state.query));
@@ -37,8 +46,6 @@
     team.slots[idx] = id;
   }
 
-  // Click on a card: toggle off if already picked, otherwise fill the targeted slot,
-  // the first empty slot of the player's role, or any empty slot.
   function pickCard(id) {
     const team = current();
     if (inTeam(state.step, id) && state.targetSlot === null) {
@@ -92,12 +99,76 @@
     render();
   }
 
-  // ---------- rendering ----------
-  const teamOvr = (side) => {
-    const ids = state.teams[side].slots.filter(Boolean);
-    return ids.length ? Math.round(ids.reduce((s, id) => s + PLAYER_BY_ID[id].ovr, 0) / ids.length) : '—';
+  // ---------- saved squads (localStorage, 6 slots) ----------
+  function readSaves() {
+    try {
+      const arr = JSON.parse(localStorage.getItem(SAVE_KEY) || '[]');
+      return Array.from({ length: SAVE_SLOTS }, (_, i) => arr[i] || null);
+    } catch (_) {
+      return Array(SAVE_SLOTS).fill(null);
+    }
+  }
+  function writeSaves(arr) {
+    try { localStorage.setItem(SAVE_KEY, JSON.stringify(arr)); return true; } catch (_) { return false; }
+  }
+  function saveTo(n) {
+    const t = current();
+    const arr = readSaves();
+    arr[n] = { name: t.name, formation: t.formation, slots: [...t.slots], tactic: { ...t.tactic }, savedAt: Date.now() };
+    if (!writeSaves(arr)) return flashTip('저장 공간을 사용할 수 없어요 (사생활 보호 모드 등).');
+    renderSaves();
+    flashTip(`${n + 1}번 슬롯에 "${t.name}" 저장 완료`);
+  }
+  function loadFrom(n) {
+    const s = readSaves()[n];
+    if (!s || !FORMATIONS[s.formation]) return;
+    const t = current();
+    t.name = s.name;
+    t.formation = s.formation;
+    t.slots = s.slots.map((id) => (id && PLAYER_BY_ID[id] ? id : null)).slice(0, 11);
+    while (t.slots.length < 11) t.slots.push(null);
+    t.tactic = { ...Sim.TACTIC_DEFAULT, ...s.tactic };
+    state.targetSlot = null;
+    closeSaves();
+    render();
+    flashTip(`"${s.name}" 불러오기 완료`);
+  }
+  function deleteSave(n) {
+    const arr = readSaves();
+    arr[n] = null;
+    writeSaves(arr);
+    renderSaves();
+  }
+
+  const ovrOf = (ids) => {
+    const list = ids.filter(Boolean);
+    return list.length ? Math.round(list.reduce((s, id) => s + PLAYER_BY_ID[id].ovr, 0) / list.length) : '—';
   };
 
+  function renderSaves() {
+    const saves = readSaves();
+    const team = current();
+    $('#saves-list').innerHTML = saves.map((s, n) => {
+      if (!s) {
+        return `<li class="save save--empty"><b>${n + 1}</b><span class="save__body"><em>빈 슬롯</em></span>
+          <span class="save__acts"><button class="btn btn--small" data-save="${n}">여기에 저장</button></span></li>`;
+      }
+      const filled = s.slots.filter(Boolean).length;
+      const date = new Date(s.savedAt).toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' });
+      return `<li class="save"><b>${n + 1}</b>
+        <span class="save__body"><strong>${esc(s.name)}</strong><small>${s.formation} · ${filled}/11 · OVR ${ovrOf(s.slots)} · ${date}</small></span>
+        <span class="save__acts">
+          <button class="btn btn--small" data-load="${n}">불러오기</button>
+          <button class="btn btn--small btn--ghost" data-save="${n}">덮어쓰기</button>
+          <button class="btn btn--small btn--ghost" data-del="${n}" aria-label="삭제">삭제</button>
+        </span></li>`;
+    }).join('');
+    $('#saves-title').textContent = `스쿼드 저장/불러오기 — ${team.name}`;
+  }
+  function openSaves() { renderSaves(); $('#saves').hidden = false; }
+  function closeSaves() { $('#saves').hidden = true; }
+
+  // ---------- rendering ----------
   function stepsHTML() {
     const item = (side, n) => {
       const t = state.teams[side];
@@ -107,10 +178,18 @@
       const locked = side === 'away' && !isFull('home') ? ' disabled' : '';
       return `<button class="step step--${side}${on}${done}" data-step="${side}"${locked}>
         <b>${n}</b><span><small>${side === 'home' ? 'HOME' : 'AWAY'} 구성</small>${esc(t.name)}</span>
-        <i>${count}/11 · OVR ${teamOvr(side)}</i></button>`;
+        <i>${count}/11 · OVR ${ovrOf(t.slots)}</i></button>`;
     };
     return `${item('home', 1)}<span class="step__rule"></span>${item('away', 2)}<span class="step__rule"></span>
       <span class="step step--kick${isFull('home') && isFull('away') ? ' is-ready' : ''}"><b>3</b><span><small>MATCH</small>킥오프</span></span>`;
+  }
+
+  function tacticsHTML(team) {
+    return Object.entries(TACTIC_OPTIONS).map(([k, def]) => `
+      <label class="tac"><span>${def.label}</span>
+        <select data-tactic="${k}">
+          ${Object.entries(def.options).map(([v, l]) => `<option value="${v}" ${team.tactic[k] === v ? 'selected' : ''}>${l}</option>`).join('')}
+        </select></label>`).join('');
   }
 
   function teamHTML() {
@@ -129,7 +208,7 @@
       const p = PLAYER_BY_ID[id];
       const off = p.pos !== slot.role ? ' is-off' : '';
       const offNote = off ? ` (원래 ${p.pos} → ${slot.role} 자리)` : '';
-      return `<button class="slot${off}" data-slot="${i}" draggable="true" style="${style}" title="${esc(p.ko)}${offNote} — 클릭해서 빼기 / 끌어서 자리 바꾸기">
+      return `<button class="slot${off}" data-slot="${i}" data-drag="slot" style="${style}" title="${esc(p.ko)}${offNote} — 탭해서 빼기 / 끌어서 자리 바꾸기">
         ${Photos.html(p)}<em>${p.short}</em></button>`;
     }).join('');
 
@@ -142,15 +221,17 @@
       <header class="team__head">
         <span class="team__tag">${side === 'home' ? 'HOME' : 'AWAY'}</span>
         <input class="team__name" value="${esc(team.name)}" maxlength="18" aria-label="팀 이름">
+        <button class="btn btn--small btn--ghost" data-act="saves">저장·불러오기</button>
       </header>
       <div class="team__meta">
         <select class="team__formation" aria-label="포메이션">
           ${Object.keys(FORMATIONS).map((f) => `<option ${f === team.formation ? 'selected' : ''}>${f}</option>`).join('')}
         </select>
-        <span>${count}/11</span><span>OVR ${teamOvr(side)}</span>
+        <span>${count}/11</span><span>OVR ${ovrOf(team.slots)}</span>
         <button class="linkish" data-act="auto">자동 채우기</button>
         <button class="linkish" data-act="clear">비우기</button>
       </div>
+      <div class="team__tactics">${tacticsHTML(team)}</div>
       <div class="mini-pitch">${slots}</div>
       <div class="team__nav">${nav}</div>`;
   }
@@ -158,13 +239,16 @@
   function cardHTML(p) {
     const mine = inTeam(state.step, p.id);
     const rival = inTeam(otherSide(), p.id);
+    const tip = `속도 ${p.pac} · 공격 ${p.att} · 패스 ${p.pas} · ${p.pos === 'GK' ? '선방' : '수비'} ${p.def} · 피지컬 ${p.phy} · 킥 ${p.fk}`;
     return `
-      <button class="pc${mine ? ' is-mine' : ''}" data-id="${p.id}" draggable="true">
+      <button class="pc${mine ? ' is-mine' : ''}" data-id="${p.id}" data-drag="card" title="${tip}">
         ${Photos.html(p, 'pc__photo')}
         <span class="pc__body">
           <b class="pc__ko">${p.ko}</b>
           <small class="pc__en">${p.name} · ${p.nat}</small>
-          <span class="pc__stats" title="공격 ${p.att} · 패스 ${p.pas} · ${p.pos === 'GK' ? '선방' : '수비'} ${p.def}">A ${p.att} · P ${p.pas} · ${p.pos === 'GK' ? 'G' : 'D'} ${p.def}</span>
+          <span class="pc__stats">${p.pos === 'GK'
+            ? `<i>선방</i>${p.def}<i>킥</i>${p.fk}`
+            : `<i>속</i>${p.pac}<i>공</i>${p.att}<i>패</i>${p.pas}<i>수</i>${p.def}`}</span>
         </span>
         <span class="pc__ovr">${p.ovr}</span>
         ${mine ? '<span class="pc__flag">✓</span>' : ''}
@@ -176,7 +260,6 @@
     const team = current();
     const layout = FORMATIONS[team.formation];
     const targetRole = state.targetSlot !== null ? layout[state.targetSlot].role : null;
-
     return ROLES.map((role) => {
       const picked = team.slots.filter((id) => id && PLAYER_BY_ID[id].pos === role).length;
       const list = PLAYERS.filter((p) => p.pos === role && matches(p)).sort((a, b) => b.ovr - a.ovr);
@@ -200,7 +283,6 @@
     teamEl.dataset.side = state.step;
     teamEl.innerHTML = teamHTML();
 
-    // Keep each column's scroll position across re-renders.
     const scroll = {};
     document.querySelectorAll('.col').forEach((c) => { scroll[c.dataset.role] = $('.col__list', c).scrollTop; });
     $('#pool').innerHTML = poolHTML();
@@ -211,7 +293,7 @@
     let tip;
     if (state.targetSlot !== null) tip = `${ROLE_KO[FORMATIONS[team.formation][state.targetSlot].role]} 자리에 넣을 선수를 고르세요 — 포지션 상관없이 어떤 카드든 가능해요.`;
     else if (found !== null) tip = `"${state.query}" 검색 결과 ${found}명`;
-    else tip = `${team.name} 구성 중 — 포지션 상관없이 아무 카드나 클릭하거나, 피치의 원하는 자리로 끌어다 놓으세요.`;
+    else tip = `${team.name} 구성 중 — 카드를 탭하거나, 피치의 원하는 자리로 끌어다 놓으세요.`;
     const tipEl = $('#pool-tip');
     if (!tipEl.classList.contains('is-warn')) tipEl.textContent = tip;
   }
@@ -222,7 +304,7 @@
     el.textContent = msg;
     el.classList.add('is-warn');
     clearTimeout(tipTimer);
-    tipTimer = setTimeout(() => { el.classList.remove('is-warn'); render(); }, 2000);
+    tipTimer = setTimeout(() => { el.classList.remove('is-warn'); render(); }, 2200);
   }
 
   function kickoff() {
@@ -230,6 +312,7 @@
       const t = state.teams[side];
       return {
         name: t.name,
+        tactic: { ...t.tactic },
         lineup: FORMATIONS[t.formation].map((slot, i) => ({ player: PLAYER_BY_ID[t.slots[i]], slot })),
       };
     };
@@ -244,6 +327,7 @@
 
   const teamEl = $('#team');
   teamEl.addEventListener('click', (e) => {
+    if (drag.suppressClick) return;
     const slotBtn = e.target.closest('.slot');
     const act = e.target.closest('[data-act]');
     if (slotBtn) {
@@ -260,11 +344,13 @@
       case 'next': return goTo('away');
       case 'prev': return goTo('home');
       case 'kickoff': return kickoff();
+      case 'saves': return openSaves();
       default: return undefined;
     }
   });
   teamEl.addEventListener('change', (e) => {
     if (e.target.matches('.team__formation')) changeFormation(e.target.value);
+    if (e.target.matches('[data-tactic]')) current().tactic[e.target.dataset.tactic] = e.target.value;
   });
   teamEl.addEventListener('input', (e) => {
     if (!e.target.matches('.team__name')) return;
@@ -272,57 +358,138 @@
     $('#steps').innerHTML = stepsHTML();
   });
 
-  // Drag & drop: cards -> slot, or slot -> slot (swap).
-  document.addEventListener('dragstart', (e) => {
-    const card = e.target.closest('.pc[draggable="true"]');
-    const slot = e.target.closest('.slot[draggable="true"]');
-    if (card) e.dataTransfer.setData('text/plain', 'card:' + card.dataset.id);
-    else if (slot) e.dataTransfer.setData('text/plain', 'slot:' + slot.dataset.slot);
-    else return;
-    e.dataTransfer.effectAllowed = 'move';
-    teamEl.classList.add('is-dragging');
-  });
-  document.addEventListener('dragend', () => teamEl.classList.remove('is-dragging'));
-  teamEl.addEventListener('dragover', (e) => {
-    const slot = e.target.closest('.slot');
-    if (!slot) return;
-    e.preventDefault();
-    document.querySelectorAll('.slot.is-over').forEach((s) => s !== slot && s.classList.remove('is-over'));
-    slot.classList.add('is-over');
-  });
-  teamEl.addEventListener('dragleave', (e) => {
-    const slot = e.target.closest('.slot');
-    if (slot && !slot.contains(e.relatedTarget)) slot.classList.remove('is-over');
-  });
-  teamEl.addEventListener('drop', (e) => {
-    const slot = e.target.closest('.slot');
-    if (!slot) return;
-    e.preventDefault();
-    const [kind, value] = e.dataTransfer.getData('text/plain').split(':');
-    const idx = +slot.dataset.slot;
-    const team = current();
-    if (kind === 'card') placeAt(idx, value);
-    else if (kind === 'slot') {
-      const from = +value;
-      [team.slots[from], team.slots[idx]] = [team.slots[idx], team.slots[from]];
-    }
-    state.targetSlot = null;
-    render();
-  });
-
   $('#pool').addEventListener('click', (e) => {
+    if (drag.suppressClick) return;
     const card = e.target.closest('.pc');
     if (card) pickCard(card.dataset.id);
   });
 
+  // Saves dialog
+  $('#saves').addEventListener('click', (e) => {
+    if (e.target === $('#saves') || e.target.closest('[data-close]')) return closeSaves();
+    const b = e.target.closest('button');
+    if (!b) return;
+    if (b.dataset.save !== undefined) saveTo(+b.dataset.save);
+    if (b.dataset.load !== undefined) loadFrom(+b.dataset.load);
+    if (b.dataset.del !== undefined) deleteSave(+b.dataset.del);
+  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#saves').hidden) closeSaves(); });
+
+  // ---------- drag & drop (Pointer Events: mouse, pen, touch) ----------
+  // A press that moves more than a few px becomes a drag with a floating ghost.
+  // Touch drags on cards start only after a short hold so the column can still scroll.
+  const drag = { src: null, ghost: null, startX: 0, startY: 0, active: false, timer: null, pointerId: null, suppressClick: false };
+
+  function slotAt(x, y) {
+    const el = document.elementFromPoint(x, y);
+    return el && el.closest('#team .slot');
+  }
+  function beginDrag(e) {
+    drag.active = true;
+    const src = drag.src;
+    const ghost = document.createElement('div');
+    ghost.className = 'drag-ghost';
+    const id = src.kind === 'card' ? src.id : current().slots[src.slot];
+    const p = PLAYER_BY_ID[id];
+    ghost.innerHTML = Photos.html(p);
+    const label = document.createElement('em');
+    label.textContent = p.short;
+    ghost.append(label);
+    document.body.append(ghost);
+    drag.ghost = ghost;
+    teamEl.classList.add('is-dragging');
+    moveGhost(e.clientX, e.clientY);
+    if (navigator.vibrate) { try { navigator.vibrate(10); } catch (_) { /* ignore */ } }
+  }
+  function moveGhost(x, y) {
+    drag.last = { x, y };
+    drag.ghost.style.transform = `translate(${x}px, ${y}px) translate(-50%, -60%)`;
+    document.querySelectorAll('.slot.is-over').forEach((s) => s.classList.remove('is-over'));
+    const over = slotAt(x, y);
+    if (over) over.classList.add('is-over');
+  }
+  function endDrag(x, y) {
+    const over = drag.active ? slotAt(x, y) : null;
+    if (over) {
+      const idx = +over.dataset.slot;
+      const team = current();
+      if (drag.src.kind === 'card') placeAt(idx, drag.src.id);
+      else if (drag.src.slot !== idx) {
+        const from = drag.src.slot;
+        [team.slots[from], team.slots[idx]] = [team.slots[idx], team.slots[from]];
+      }
+      state.targetSlot = null;
+    }
+    if (drag.active) {
+      // swallow the click that follows a drag
+      drag.suppressClick = true;
+      setTimeout(() => { drag.suppressClick = false; }, 0);
+    }
+    cleanupDrag();
+    if (over) render();
+  }
+  function cleanupDrag() {
+    clearTimeout(drag.timer);
+    if (drag.ghost) drag.ghost.remove();
+    document.querySelectorAll('.slot.is-over').forEach((s) => s.classList.remove('is-over'));
+    teamEl.classList.remove('is-dragging');
+    Object.assign(drag, { src: null, ghost: null, active: false, pointerId: null });
+  }
+
+  document.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0 || $('#draft').hidden) return;
+    const card = e.target.closest('[data-drag="card"]');
+    const slot = e.target.closest('[data-drag="slot"]');
+    if (!card && !slot) return;
+    drag.src = card ? { kind: 'card', id: card.dataset.id } : { kind: 'slot', slot: +slot.dataset.slot };
+    drag.startX = e.clientX;
+    drag.startY = e.clientY;
+    drag.pointerId = e.pointerId;
+    if (e.pointerType === 'touch' && card) {
+      // long-press to pick a card up; a quick swipe still scrolls the column
+      drag.timer = setTimeout(() => { if (drag.src) beginDrag(e); }, 280);
+    }
+  });
+  document.addEventListener('pointermove', (e) => {
+    if (!drag.src || e.pointerId !== drag.pointerId) return;
+    const moved = Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY);
+    if (!drag.active) {
+      if (e.pointerType === 'touch' && drag.src.kind === 'card') {
+        if (moved > 10) cleanupDrag(); // it was a scroll
+        return;
+      }
+      if (moved < 6) return;
+      beginDrag(e);
+    }
+    e.preventDefault();
+    moveGhost(e.clientX, e.clientY);
+  }, { passive: false });
+  document.addEventListener('pointerup', (e) => {
+    if (!drag.src || e.pointerId !== drag.pointerId) return;
+    endDrag(e.clientX, e.clientY);
+  });
+  document.addEventListener('pointercancel', () => { if (!drag.active) cleanupDrag(); });
+  // Touch fallback: while a drag is active, stop scrolling and follow the finger even if
+  // the browser cancelled the pointer stream.
+  document.addEventListener('touchmove', (e) => {
+    if (!drag.active) return;
+    e.preventDefault();
+    const t = e.touches[0];
+    drag.last = { x: t.clientX, y: t.clientY };
+    moveGhost(t.clientX, t.clientY);
+  }, { passive: false });
+  document.addEventListener('touchend', () => {
+    if (drag.active && drag.last) endDrag(drag.last.x, drag.last.y);
+  });
+
+  // ---------- search ----------
   const search = $('#search');
   search.addEventListener('input', () => { state.query = search.value.trim(); render(); });
   search.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') { search.value = ''; state.query = ''; render(); }
     if (e.key === 'Enter') {
-      // Enter picks the single remaining result.
       const hits = PLAYERS.filter(matches);
-      if (hits.length === 1) { pickCard(hits[0].id); search.value = ''; state.query = ''; render(); }
+      if (hits.length === 1) { pickCard(hits[0].id); search.value = ''; state.query = ''; render(); search.blur(); }
     }
   });
   document.addEventListener('keydown', (e) => {
