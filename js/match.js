@@ -38,7 +38,7 @@
   let teams = null;
   let result = null;
   let runId = 0;
-  let speed = 1;
+  let speed = 2; // default playback speed (matches the highlighted 2× button)
   let skipping = false;
   let backCb = () => {};
   const live = { possession: 'home', kickoff: false, celebrate: null, setPiece: null, score: { home: 0, away: 0 }, cards: null };
