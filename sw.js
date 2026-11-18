@@ -1,5 +1,5 @@
 // Service worker: offline app shell + cached player photos and fonts.
-const VERSION = 'mdc-v6';
+const VERSION = 'mdc-v8';
 const SHELL = [
   './', 'index.html', 'style.css', 'manifest.webmanifest',
   'js/players.js', 'js/formations.js', 'js/photos.js', 'js/sim.js', 'js/options.js', 'js/sound.js', 'js/match.js', 'js/draft.js',
@@ -8,7 +8,8 @@ const SHELL = [
 const RUNTIME = 'mdc-runtime-v2'; // v1 held opaque photo responses that break CORS <img> loads
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  // `reload` bypasses the HTTP cache so a new release never stores an older file
+  e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (e) => {
@@ -27,7 +28,9 @@ self.addEventListener('fetch', (e) => {
   // App shell: network first (so updates land), but fall back to the cache after 3 s
   // on a weak connection, and when offline.
   if (url.origin === self.location.origin) {
-    const network = fetch(req).then((res) => {
+    // `no-cache` revalidates with the server (cheap 304s) so files of one release are never
+    // mixed with stale copies from the browser's HTTP cache.
+    const network = fetch(req, { cache: 'no-cache' }).then((res) => {
       if (res.ok) { const copy = res.clone(); caches.open(VERSION).then((c) => c.put(req, copy)); }
       return res;
     });

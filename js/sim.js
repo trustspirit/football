@@ -56,7 +56,7 @@
   // A player out of their natural role loses effectiveness (technical stats only).
   function eff(entry, stat) {
     const { player, slot } = entry;
-    const v = (player[stat] ?? 70) * fatigue(entry);
+    const v = (player[stat] ?? (stat === 'dri' ? 60 : 70)) * fatigue(entry);
     if (stat === 'pac' || stat === 'phy' || stat === 'fk') return v;
     if (player.pos === slot.role) return v;
     if (player.pos === 'GK' || slot.role === 'GK') return v * 0.5;
@@ -105,6 +105,10 @@
           break;
         }
         case 'miss': touch(e.side, e.from).r -= 0.05; break;
+        case 'dribble':
+          if (e.ok) { touch(e.side, e.from).r += 0.1; touch(opp(e.side), e.by).r -= 0.04; }
+          else { touch(e.side, e.from).r -= 0.04; touch(opp(e.side), e.by).r += 0.1; }
+          break;
         case 'foul': {
           e.pid = ids[e.side][e.by];
           const f = touch(e.side, e.by);
@@ -155,6 +159,7 @@
     return {
       passes: 0, completed: 0, shots: 0, onTarget: 0, goals: 0,
       fouls: 0, yellows: 0, reds: 0, corners: 0, freekicks: 0, penalties: 0, throwins: 0,
+      dribbles: 0, dribblesWon: 0,
     };
   }
 
@@ -190,6 +195,7 @@
     let setPiece = null;      // { type: 'freekick'|'penalty'|'corner', side, x, y, direct }
     let counterLeft = 0;      // passes left in a counter-attack
     let space = 0;            // bonus after beating a high press
+    let carry = { key: null, adv: 0, n: 0 }; // ground gained by the current ball carrier's dribbles
 
     // ---------- helpers ----------
     const active = (s) => T[s].lineup.map((e, i) => ({ e, i })).filter((o) => !T[s].off.has(o.i));
@@ -243,10 +249,12 @@
     const menDown = (s) => T[s].off.size;
 
     const restart = (s, idx, type) => {
+      carry = { key: null, adv: 0, n: 0 };
       side = s; holder = idx; lastPasser = null; fromCross = false; counterLeft = 0; space = 0;
       events.push({ type, side, holder, minute: Math.floor(minute) });
     };
     const turnover = (newSide, idx) => {
+      carry = { key: null, adv: 0, n: 0 };
       side = newSide; holder = idx; lastPasser = null; fromCross = false; space = 0;
       const tac = T[newSide].tac;
       const oppAttacking = T[other(newSide)].tac.mentality === 'attacking';
@@ -499,7 +507,8 @@
       const oppSide = other(side);
       const team = T[side];
       const h = team.lineup[holder];
-      const depth = h.slot.x;
+      const carried = carry.key === side + holder ? carry : { adv: 0, n: 0 };
+      const depth = Math.min(92, h.slot.x + carried.adv);
       const isGK = h.slot.role === 'GK';
       const men = MENTALITY[team.tac.mentality];
       const sty = STYLE[team.tac.style];
@@ -515,6 +524,32 @@
       }
       fromCross = false;
       if (shotKind) { shoot(shotKind, holder, edge); continue; }
+
+      // --- Dribble: good dribblers sometimes take a defender on ----------------
+      // Success gains ground (and maybe a foul); failure loses the ball to the tackler.
+      if (!isGK && depth >= 30 && carried.n < 2) {
+        const styleMul = { possession: 1, balanced: 1, counter: 1.3, direct: 0.7 }[team.tac.style] || 1;
+        const pTry = clamp(((h.player.dri ?? 60) - 70) / 100, 0, 0.24) * styleMul * (h.slot.role === 'DEF' ? 0.4 : 1);
+        if (rng() < pTry) {
+          const by = nearestOpponent(oppSide, depth + 6, h.slot.y, (e) => e.slot.role !== 'GK');
+          const m = T[oppSide].lineup[by];
+          const pWin = clamp(0.52 + (eff(h, 'dri') - eff(m, 'def')) / 90 + (eff(h, 'pac') - eff(m, 'pac')) / 250, 0.25, 0.85);
+          minute += 0.2 + rng() * 0.15;
+          stats[side].dribbles++;
+          if (rng() < pWin) {
+            stats[side].dribblesWon++;
+            const adv = 6 + rng() * 8;
+            events.push({ type: 'dribble', side, from: holder, by, ok: true, minute: Math.floor(minute) });
+            carry = { key: side + holder, adv: carried.adv + adv, n: carried.n + 1 };
+            space = Math.max(space, 0.04);
+            maybeFoul(holder, { x: Math.min(92, depth + adv), y: h.slot.y });
+          } else {
+            events.push({ type: 'dribble', side, from: holder, by, ok: false, minute: Math.floor(minute) });
+            turnover(oppSide, by);
+          }
+          continue;
+        }
+      }
 
       // --- Pass ------------------------------------------------------------
       const wide = Math.abs(h.slot.y - 50) >= 28 && depth >= 55;
@@ -570,6 +605,7 @@
         space = depth < 45 && t.x >= 45 && T[oppSide].tac.press === 'high' ? 0.05 : 0;
         lastPasser = holder;
         holder = target.i;
+        carry = { key: null, adv: 0, n: 0 };
         fromCross = kind === 'cross';
         maybeFoul(target.i, t);
       } else {

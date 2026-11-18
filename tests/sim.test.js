@@ -164,3 +164,21 @@ test('ratings: everyone who played is rated 3-10, goals are credited, there is a
     assert.equal(goals, r.score.home + r.score.away);
   }
 });
+
+test('dribbles: good dribblers take players on more often, failures lose the ball', () => {
+  global.PLAYERS.forEach((p) => assert.ok(p.dri >= 25 && p.dri <= 99, `${p.id}.dri=${p.dri}`));
+  const winger = lineup('4-3-3', ['courtois', 'hakimi', 'vandijk', 'saliba', 'taa', 'rodri', 'bellingham', 'debruyne', 'yamal', 'haaland', 'vinicius']);
+  let byStars = 0, byDefs = 0;
+  for (let s = 1; s <= 200; s++) {
+    const ev = simulate(winger, weaker, s).events;
+    ev.forEach((e, i) => {
+      if (e.type !== 'dribble' || e.side !== 'home') return;
+      if (e.from === 8 || e.from === 10) byStars++;
+      if (winger[e.from].slot.role === 'DEF') byDefs++;
+      // the next event with a team (skipping 'added' / 'half' boards) belongs to the tackler's side
+      const nx = ev.slice(i + 1).find((x) => x.side);
+      if (!e.ok && nx && !['half', 'kickoff'].includes(nx.type)) assert.equal(nx.side, 'away', 'a lost dribble gives the ball away');
+    });
+  }
+  assert.ok(byStars > byDefs * 2, `stars ${byStars} vs defenders ${byDefs}`);
+});

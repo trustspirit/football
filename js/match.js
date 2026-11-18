@@ -492,6 +492,24 @@
     c.run = null;
   }
 
+  // Dead balls stay put: the taker must walk/run to the ball, however far away he was.
+  // Waits (in sim time) until he is there; `minSec` keeps a short pause for set-up.
+  async function arrive(o, spot, minSec, maxSec = 12) {
+    let t = 0;
+    while (t < maxSec && (t < minSec || dist(o.p, spot) > 0.9)) {
+      if (skipping) break;
+      await simWait(0.2);
+      t += 0.2;
+    }
+    if (dist(o.p, spot) > 0.9) { o.p = { ...spot }; o.v = { x: 0, y: 0 }; } // skip mode / safety
+  }
+  // Short run-up, then the dead ball is struck from where it lies (never pulled to the feet).
+  async function runUp(o, side) {
+    const behind = { x: ball.p.x - dirOf(side) * 0.6, y: ball.p.y };
+    o.ov = { t: behind, spd: 3 };
+    await simWait(0.35);
+  }
+
   // Put everyone in position for a dead ball. `crowd` sends players into the box.
   function setupSetPiece(sp) {
     live.setPiece = sp;
@@ -551,9 +569,9 @@
     live.possession = S;
     const setPiece = ev.kind === 'corner' || ev.kind === 'fkcross';
     const isGK = agents[fromK].role === 'GK';
-    if (ev.kind === 'throw') { ball.h = 2.1; agents[fromK].el.classList.remove('is-throw'); }
+    if (ev.kind === 'throw') { ball.h = 2.1; agents[fromK].el.classList.remove('is-throw'); agents[fromK].ov = null; }
     else if (!setPiece) await carry(fromK, S, isGK ? rand(0.6, 1.2) : rand(0.3, 1.1), isGK ? 2 : 6);
-    else holdBy(fromK);
+    else await runUp(agents[fromK], S);
     live.kickoff = false;
 
     const { A } = setPiece
@@ -562,7 +580,7 @@
     r.ov = { t: A, spd: 'sprint' };
     const header = (ev.kind === 'cross' || setPiece) && ev.nextHeader;
     await kick(A, { ...prof, h1: header ? 1.9 : 0, then: { mode: header ? 'hover' : prof.air ? 'dead' : 'held', holder: toK } });
-    if (setPiece) { live.setPiece = null; Object.values(agents).forEach((o) => { o.spot = null; }); }
+    if (setPiece) { live.setPiece = null; agents[fromK].ov = null; Object.values(agents).forEach((o) => { o.spot = null; }); }
     if (prof.air && !header) {
       const d = dist(ball.p, agents[fromK].p) || 1;
       const dir = { x: (A.x - agents[fromK].p.x) / d, y: (A.y - agents[fromK].p.y) / d };
@@ -580,9 +598,9 @@
     const prof = PASS[ev.kind] || PASS.short;
     const setPiece = ev.kind === 'corner' || ev.kind === 'fkcross';
     live.possession = S;
-    if (ev.kind === 'throw') { ball.h = 2.1; agents[fromK].el.classList.remove('is-throw'); }
+    if (ev.kind === 'throw') { ball.h = 2.1; agents[fromK].el.classList.remove('is-throw'); agents[fromK].ov = null; }
     else if (!setPiece) await carry(fromK, S, rand(0.3, 0.9));
-    else holdBy(fromK);
+    else await runUp(agents[fromK], S);
     live.kickoff = false;
 
     const r = agents[toK];
@@ -600,7 +618,7 @@
     const aerial = prof.air;
     const keeper = d.role === 'GK';
     await kick(C, { ...prof, arrive: 8, h1: aerial ? (keeper ? 2.2 : 1.8) : 0, then: { mode: keeper ? 'held' : 'dead', holder: byK } });
-    if (setPiece) { live.setPiece = null; Object.values(agents).forEach((o) => { o.spot = null; }); }
+    if (setPiece) { live.setPiece = null; agents[fromK].ov = null; Object.values(agents).forEach((o) => { o.spot = null; }); }
     live.possession = D;
     if (ev.out) {
       // touched out over the sideline
@@ -639,8 +657,17 @@
       ball.mode = 'hover'; ball.holder = shK; ball.h = 1.9;
       await simWait(0.15);
     } else if (ev.kind === 'penalty' || ev.kind === 'freekick') {
-      holdBy(shK);
-      await simWait(0.5);
+      // struck from the spot after a run-up; the wall jumps as the ball goes
+      await runUp(agents[shK], S);
+      agents[shK].ov = null;
+      const wall = live.wall || [];
+      live.wall = null;
+      const endJump = () => wall.forEach((o) => { o.el.classList.remove('is-jump'); o.ov = null; });
+      if (skipping) endJump();
+      else {
+        wall.forEach((o) => o.el.classList.add('is-jump'));
+        setTimeout(endJump, 700 / speed);
+      }
     } else {
       await carry(shK, S, ev.kind === 'long' ? rand(0.4, 0.8) : rand(0.2, 0.5), 3);
     }
@@ -704,11 +731,34 @@
     Object.values(agents).forEach((o) => { o.spot = null; });
   }
 
-  async function doFoul(ev) {
+  // Where the foul happens on the pitch. It has to agree with what the engine awards next:
+  // a penalty must be inside the box, a direct free kick in shooting range, an ordinary
+  // free kick outside the box. The free kick / penalty is then taken from this exact spot.
+  function foulSpot(attSide, p, next) {
+    const goalX = goalLineX(attSide);
+    const dir = dirOf(attSide);
+    const dx = Math.abs(goalX - p.x);
+    const inBox = dx < 16.5 && Math.abs(p.y - 34) < 20;
+    if (next && next.type === 'penalty') return { x: goalX - dir * clamp(dx, 5, 15), y: clamp(p.y, 17, 51) };
+    if (next && next.type === 'freekick' && next.direct) return { x: goalX - dir * clamp(dx, 18, 30), y: clamp(p.y, 21, 47) };
+    if (inBox) return { x: goalX - dir * 17.5, y: p.y };
+    return inPitch(p, 2);
+  }
+
+  async function doFoul(ev, next) {
     const foulK = key(ev.side, ev.by);
     const vicK = key(ev.victimSide, ev.on);
     const f = agents[foulK];
     const v = agents[vicK];
+    const spot = foulSpot(ev.victimSide, v.p, next);
+    live.foulSpot = spot;
+    // if the decision needs a different place (e.g. into the box), the victim carries the ball there first
+    if (dist(v.p, spot) > 2.5 && !skipping) {
+      holdBy(vicK);
+      v.ov = { t: spot, spd: 'sprint' };
+      await arrive(v, spot, 0, 2.5);
+    }
+    v.p = { ...spot };
     // the challenge
     f.ov = { t: { ...v.p }, spd: 'sprint', acc: 20 };
     await simWait(0.35);
@@ -755,7 +805,9 @@
 
   async function doFreekick(ev) {
     const k = key(ev.side, ev.holder);
-    const spot = simToPitch(ev.side, ev.x, ev.y);
+    // taken where the foul was (doFoul), not from the engine's rough zone
+    const spot = live.foulSpot ? { ...live.foulSpot } : simToPitch(ev.side, ev.x, ev.y);
+    live.foulSpot = null;
     Object.assign(ball, { p: { ...spot }, h: 0, mode: 'dead', holder: null, alpha: 1, dest: null });
     const t = agents[k];
     t.ov = { t: { x: spot.x - dirOf(ev.side) * 1.2, y: spot.y }, spd: 'sprint' };
@@ -766,25 +818,22 @@
     gk.ov = { t: { x: goalLineX(ev.side) - dirOf(ev.side) * 1.2, y: 34 + (spot.y < 34 ? 1.5 : -1.5) }, spd: 4 };
     const dangerous = ev.direct || ev.x >= 55;
     if (dangerous) log(mm(ev), `${teams[ev.side].name} ${ev.direct ? '직접 프리킥' : '프리킥'} — ${playerOf(ev.side, ev.holder).short}`, ev.side);
-    await simWait(dangerous ? 2.2 : 1);
-    t.ov = null;
+    await arrive(t, t.ov.t, dangerous ? 2.2 : 0.8);
     gk.ov = null;
-    holdBy(k);
-    if (!ev.direct) {
-      if (ev.x < 55) { live.setPiece = null; Object.values(agents).forEach((o) => { o.spot = null; }); }
+    if (!ev.direct && ev.x < 55) {
+      // taken short: play on from the taker's feet
+      t.ov = null;
+      holdBy(k);
+      live.setPiece = null;
+      Object.values(agents).forEach((o) => { o.spot = null; });
     }
-    // the wall jumps as the ball is struck
-    const endJump = () => wall.forEach((o) => { o.el.classList.remove('is-jump'); o.ov = null; });
-    if (skipping) endJump();
-    else {
-      wall.forEach((o) => o.el.classList.add('is-jump'));
-      setTimeout(endJump, 700 / speed);
-    }
+    live.wall = wall; // jumps when the shot is struck (doShot)
   }
 
   async function doPenalty(ev) {
     const k = key(ev.side, ev.holder);
     const spot = { x: goalLineX(ev.side) - dirOf(ev.side) * 11, y: 34 };
+    live.foulSpot = null;
     Object.assign(ball, { p: { ...spot }, h: 0, mode: 'dead', holder: null, alpha: 1, dest: null });
     setupSetPiece({ type: 'penalty', side: ev.side });
     const t = agents[k];
@@ -794,11 +843,9 @@
     banner('PENALTY!', ev.side);
     Sound.whistle('short');
     log(mm(ev), `페널티킥 선언 — 키커 ${playerOf(ev.side, ev.holder).short}`, ev.side, true);
-    await simWait(2.6);
-    t.ov = { t: { ...spot }, spd: 4 };
-    await simWait(0.5);
-    t.ov = null;
+    await arrive(t, t.ov.t, 2.6);
     gk.ov = null;
+    // taker stays behind the ball; doShot does the run-up
     live.setPiece = null;
     Object.values(agents).forEach((o) => { o.spot = null; });
   }
@@ -814,10 +861,9 @@
     const gk = agents[gkKey(other(ev.side))];
     gk.ov = { t: { x: lineX - dirOf(ev.side) * 1.5, y: 34 + (ev.top ? -1.5 : 1.5) }, spd: 4 };
     log(mm(ev), `${teams[ev.side].name} 코너킥 — ${playerOf(ev.side, ev.holder).short}`, ev.side);
-    await simWait(2.4);
-    t.ov = null;
+    await arrive(t, t.ov.t, 2.4);
     gk.ov = null;
-    holdBy(k);
+    // the taker keeps his override: he stays at the flag until the ball is delivered
   }
 
   // Ball went out over the touchline: the taker fetches it and holds it overhead.
@@ -832,14 +878,55 @@
     Object.assign(ball, { p: { ...spot }, h: 0, mode: 'dead', holder: null, alpha: 0, dest: null });
     t.ov = { t: { x, y: top ? 0.6 : H - 0.6 }, spd: 'sprint' };
     if (Math.random() < 0.4) log(mm(ev), `${teams[ev.side].name} 스로인 — ${playerOf(ev.side, ev.holder).short}`, ev.side);
-    await simWait(1.6);
+    await arrive(t, t.ov.t, 1.2);
+    ball.p = { x: t.p.x, y: t.p.y };
     ball.alpha = 1;
     ball.mode = 'hover';
     ball.holder = k;
     ball.h = 2.1;
     t.el.classList.add('is-throw');
     await simWait(0.7);
-    t.ov = null;
+    // stays on the line until the throw is taken (doPass / doIntercept release him)
+  }
+
+  // Dribble: the carrier runs at a defender with the ball. Won: a sidestep past him
+  // (the defender is left on the floor). Lost: the defender pokes it away.
+  async function doDribble(ev) {
+    const S = ev.side;
+    const D = other(S);
+    const ck = key(S, ev.from);
+    const dk = key(D, ev.by);
+    const c = agents[ck];
+    const d = agents[dk];
+    live.possession = S;
+    live.kickoff = false;
+    if (ball.holder !== ck || ball.mode !== 'held') holdBy(ck);
+    const dir = dirOf(S);
+    const meet = inPitch({ x: c.p.x + dir * 5, y: c.p.y + rand(-1, 1) }, 3);
+    c.ov = { t: meet, spd: 'sprint' };
+    d.ov = { t: lerpP(d.p, meet, 0.85), spd: 'sprint', acc: 16 };
+    await simWait(0.65);
+    if (ev.ok) {
+      const swerve = (c.p.y < H / 2 ? 1 : -1) * rand(2.5, 4.5);
+      const past = inPitch({ x: c.p.x + dir * rand(7, 11), y: c.p.y + swerve }, 3);
+      c.ov = { t: past, spd: 'sprint', acc: 18 };
+      d.ov = { t: { x: d.p.x, y: d.p.y - swerve * 0.3 }, spd: 2 };
+      d.el.classList.add('is-down');
+      if (Math.random() < 0.45 || playerOf(S, ev.from).dri >= 88) log(mm(ev), `${playerOf(S, ev.from).short} 드리블 돌파 — ${playerOf(D, ev.by).short} 제침`, S);
+      await simWait(1.0);
+      d.el.classList.remove('is-down');
+      d.ov = null;
+      c.ov = null;
+    } else {
+      d.ov = { t: { ...c.p }, spd: 'sprint', acc: 22 };
+      await simWait(0.25);
+      c.ov = null;
+      d.ov = null;
+      holdBy(dk);
+      live.possession = D;
+      if (Math.random() < 0.4) log(mm(ev), `${playerOf(D, ev.by).short} 태클로 공 탈취`, D);
+      await simWait(0.3);
+    }
   }
 
   // Substitution: the tired player jogs off, the token turns into the new player.
@@ -912,7 +999,7 @@
       case 'intercept':
         return doIntercept(ev);
       case 'foul':
-        return doFoul(ev);
+        return doFoul(ev, next);
       case 'freekick':
         return doFreekick(ev);
       case 'penalty':
@@ -932,6 +1019,8 @@
       }
       case 'sub':
         return doSub(ev);
+      case 'dribble':
+        return doDribble(ev);
       case 'goal': {
         await doShot(ev);
         live.score = { ...ev.score };
@@ -1041,6 +1130,7 @@
       ['점유율', pct(h.passes, totalPasses), pct(a.passes, totalPasses)],
       ['슈팅 (유효)', `${h.shots} (${h.onTarget})`, `${a.shots} (${a.onTarget})`],
       ['패스 성공률', pct(h.completed, h.passes), pct(a.completed, a.passes)],
+      ['드리블 (성공)', `${h.dribbles} (${h.dribblesWon})`, `${a.dribbles} (${a.dribblesWon})`],
       ['코너킥', h.corners, a.corners],
       ['프리킥 / PK', `${h.freekicks} / ${h.penalties}`, `${a.freekicks} / ${a.penalties}`],
       ['파울', h.fouls, a.fouls],

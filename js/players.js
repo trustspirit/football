@@ -339,6 +339,19 @@
   };
   const SKILL_DEFAULT = { GK: [50, 75, 72], DEF: [74, 80, 62], MID: [72, 70, 74], FWD: [82, 72, 70] };
 
+  // Dribbling for players known for it; everyone else gets a value from pace / attack / passing.
+  const DRI = {
+    messi: 96, neymar: 94, yamal: 93, vinicius: 93, musiala: 92, mbappe: 92, kvara: 90, dembele: 90,
+    nicowilliams: 89, mitoma: 89, wirtz: 89, foden: 89, leao: 88, olise: 88, doue: 88, pedri: 88,
+    bernardo: 88, luisdiaz: 88, saka: 87, salah: 87, rodrygo: 87, guler: 87, odegaard: 87, yildiz: 87,
+    sane: 87, dybala: 87, kubo: 86, barcola: 86, xavisimons: 86, modric: 86, leekangin: 86, raphinha: 86,
+    palmer: 86, bellingham: 86, frimpong: 86, son: 85, lookman: 85, paqueta: 85, davies: 85, ronaldo: 85,
+    nunomendes: 85, hwangheechan: 84, debruyne: 84, rashford: 84, martinelli: 84, hakimi: 84, cancelo: 84,
+    griezmann: 84, benzema: 84, theo: 83, camavinga: 83, alvarez: 83, valverde: 82, lewandowski: 80,
+    kane: 80, haaland: 78,
+  };
+  const dribbleOf = (id, pos, att, pas, pac) => DRI[id] || (pos === 'GK' ? 30 : Math.round(0.45 * pac + 0.35 * att + 0.2 * pas) - (pos === 'DEF' ? 6 : 0));
+
   // Photo overrides for players whose English Wikipedia article has no lead image:
   // a Wikimedia Commons file name, served via Special:FilePath.
   const COMMONS = {
@@ -349,8 +362,9 @@
     const [wa, wp, wd] = WEIGHTS[pos];
     const [ko, short] = KO[id] || [name, name.split(' ').slice(-1)[0]];
     const [pac, phy, fk] = SKILLS[id] || SKILL_DEFAULT[pos];
+    const dri = dribbleOf(id, pos, att, pas, pac);
     return {
-      id, name, ko, short, wiki, pos, nat, att, pas, def, pac, phy, fk,
+      id, name, ko, short, wiki, pos, nat, att, pas, def, pac, phy, fk, dri,
       commons: COMMONS[id] || null,
       ovr: Math.round(att * wa + pas * wp + def * wd),
     };

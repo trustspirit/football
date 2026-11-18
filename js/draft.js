@@ -269,14 +269,17 @@
         <button class="btn btn--small btn--ghost" data-act="saves">저장·불러오기</button>
       </header>
       <div class="team__meta">
-        <select class="team__formation" aria-label="포메이션">
-          ${Object.keys(FORMATIONS).map((f) => `<option ${f === team.formation ? 'selected' : ''}>${f}</option>`).join('')}
-        </select>
         <span>${count}/11</span><span>OVR ${ovrOf(team.slots)}</span>
         <button class="linkish" data-act="auto">자동 채우기</button>
         <button class="linkish" data-act="clear">비우기</button>
       </div>
-      <div class="team__tactics">${tacticsHTML(team)}</div>
+      <div class="team__tactics">
+        <label class="tac"><span>포메이션</span>
+          <select class="team__formation" aria-label="포메이션">
+            ${Object.keys(FORMATIONS).map((f) => `<option ${f === team.formation ? 'selected' : ''}>${f}</option>`).join('')}
+          </select></label>
+        ${tacticsHTML(team)}
+      </div>
       <div class="mini-pitch">${slots}</div>
       ${useBench() ? benchHTML(team) : ''}
       <div class="team__nav">${nav}</div>`;
@@ -295,7 +298,7 @@
   function cardHTML(p) {
     const mine = inTeam(state.step, p.id);
     const rival = inTeam(otherSide(), p.id);
-    const tip = `속도 ${p.pac} · 공격 ${p.att} · 패스 ${p.pas} · ${p.pos === 'GK' ? '선방' : '수비'} ${p.def} · 피지컬 ${p.phy} · 킥 ${p.fk}`;
+    const tip = `속도 ${p.pac} · 드리블 ${p.dri} · 공격 ${p.att} · 패스 ${p.pas} · ${p.pos === 'GK' ? '선방' : '수비'} ${p.def} · 피지컬 ${p.phy} · 킥 ${p.fk}`;
     return `
       <button class="pc${mine ? ' is-mine' : ''}" data-id="${p.id}" data-drag="card" title="${tip}">
         ${Photos.html(p, 'pc__photo')}
@@ -304,7 +307,7 @@
           <small class="pc__en">${p.name} · ${p.nat}</small>
           <span class="pc__stats">${p.pos === 'GK'
             ? `<i>선방</i>${p.def}<i>킥</i>${p.fk}`
-            : `<i>속</i>${p.pac}<i>공</i>${p.att}<i>패</i>${p.pas}<i>수</i>${p.def}`}</span>
+            : `<i>속</i>${p.pac}<i>드</i>${p.dri}<i>공</i>${p.att}<i>패</i>${p.pas}<i>수</i>${p.def}`}</span>
         </span>
         <span class="pc__ovr">${p.ovr}</span>
         ${mine ? '<span class="pc__flag">✓</span>' : ''}
@@ -601,6 +604,13 @@
     render();
   });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !settings.hidden) settings.hidden = true; });
+
+  // rotate hint: dismissed for this session
+  try { if (sessionStorage.getItem('mdc-rotate-hint') === 'off') document.body.classList.add('no-rotate-hint'); } catch (_) { /* ignore */ }
+  $('#rotate-hint-close').addEventListener('click', () => {
+    document.body.classList.add('no-rotate-hint');
+    try { sessionStorage.setItem('mdc-rotate-hint', 'off'); } catch (_) { /* ignore */ }
+  });
 
   Match.onBack(() => render());
 

@@ -79,12 +79,14 @@
   <!-- MATCH: fits in one screen -->
   <main id="match" class="screen screen--match" hidden>
     <section class="scoreboard">
+      <button id="exit" class="sb-btn sb-btn--exit" aria-label="스쿼드로 돌아가기">← 나가기</button>
       <div class="sb__team sb__team--home"><span class="sb__cards" id="sb-home-cards"></span><span class="sb__name" id="sb-home-name"></span><i></i></div>
       <div class="sb__mid">
         <div class="sb__score"><span id="sb-home">0</span><b>:</b><span id="sb-away">0</span></div>
         <div class="sb__clock"><span id="clock">0'</span><em id="added" hidden></em></div>
       </div>
       <div class="sb__team sb__team--away"><i></i><span class="sb__name" id="sb-away-name"></span><span class="sb__cards" id="sb-away-cards"></span></div>
+      <button id="skip" class="sb-btn sb-btn--skip">결과 보기 ▸▸</button>
     </section>
 
     <section class="stage">
@@ -113,8 +115,6 @@
           <button data-speed="2">2×</button>
           <button data-speed="4">4×</button>
           <button id="mute" class="ctl-icon" aria-label="사운드 끄기" aria-pressed="false">🔊</button>
-          <button id="skip" class="ctl-link">결과 ▸▸</button>
-          <button id="exit" class="ctl-link" aria-label="스쿼드로 돌아가기">나가기</button>
         </div>
         <ol class="log" id="log" aria-live="polite" aria-label="문자 중계"></ol>
       </aside>
@@ -139,6 +139,13 @@
       </div>
     </div>
   </main>
+
+  <!-- shown only on touch tablets held upright (CSS media query) -->
+  <div class="rotate-hint" id="rotate-hint" role="status">
+    <span class="rotate-hint__icon" aria-hidden="true"></span>
+    <span><b>가로로 돌려 보세요</b>화면을 가로로 하면 경기장과 선수가 훨씬 크게 보여요.</span>
+    <button class="rotate-hint__close" id="rotate-hint-close" aria-label="안내 닫기">✕</button>
+  </div>
 
   <script src="js/players.js"></script>
   <script src="js/formations.js"></script>
