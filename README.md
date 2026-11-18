@@ -10,6 +10,8 @@ No build step. Open `index.html` in a browser, or serve the folder:
 python3 -m http.server 8000
 ```
 
+Live: https://trustspirit.github.io/football/
+
 Player photos are loaded at runtime from the Wikipedia / Wikimedia Commons API (internet required; initials are shown as a fallback).
 
 ## How it works
