@@ -29,6 +29,7 @@
     punt: { air: true, peak: 0.17 },
     corner: { air: true, peak: 0.13 },
     fkcross: { air: true, peak: 0.1 },
+    throw: { air: true, peak: 0.06 },
   };
   const SHOT_KO = { shot: '슛', long: '중거리 슛', header: '헤딩', freekick: '프리킥', penalty: '페널티킥' };
   const MENT_SHIFT = { defensive: -4, balanced: 0, attacking: 4 };
@@ -45,6 +46,8 @@
   const agents = {};
   const ball = { p: { x: W / 2, y: H / 2 }, h: 0, mode: 'dead', holder: null, fl: null, spin: 0, touch: 0, alpha: 1, dest: null, speed: 0 };
   const trail = [];
+  // The referee trails play diagonally and runs in to show cards.
+  const ref = { p: { x: W / 2, y: H / 2 + 8 }, v: { x: 0, y: 0 }, goal: null, ov: null, el: null };
   let simT = 0;
   let last = 0;
   let rafGen = 0;
@@ -199,6 +202,21 @@
     });
   }
 
+  function stepRef(dt) {
+    const side = ball.p.y < H / 2 ? 1 : -1; // stay on the far side of the ball
+    const goal = ref.ov || inPitch({ x: ball.p.x - dirOf(live.possession) * 9, y: ball.p.y + side * 10 }, 3);
+    const max = ref.ov ? 8 : 6;
+    const dx = goal.x - ref.p.x;
+    const dy = goal.y - ref.p.y;
+    const d = Math.hypot(dx, dy);
+    const want = d < 0.05 ? 0 : max * Math.min(1, d / 4);
+    const k = 1 - Math.exp(-dt * 3);
+    ref.v.x += ((d ? (dx / d) * want : 0) - ref.v.x) * k;
+    ref.v.y += ((d ? (dy / d) * want : 0) - ref.v.y) * k;
+    ref.p.x += ref.v.x * dt;
+    ref.p.y += ref.v.y * dt;
+  }
+
   function stepBall(dt) {
     const before = { ...ball.p };
     if (ball.mode === 'flight') {
@@ -300,6 +318,10 @@
       o.el.style.transform = `translate(-50%, -50%) translateY(${bob}px)`;
       o.el.classList.toggle('has-ball', ball.holder === o.key && ball.mode === 'held');
     });
+    if (ref.el) {
+      ref.el.style.left = (ref.p.x / W) * 100 + '%';
+      ref.el.style.top = (ref.p.y / H) * 100 + '%';
+    }
     const b = $('#ball');
     const s = $('#ball-shadow');
     const lift = ball.h * pxPerM * 1.1;
@@ -340,6 +362,7 @@
       simT += dt;
       plan();
       stepAgents(dt);
+      stepRef(dt);
       stepBall(dt);
     }
     const due = timers.filter((t) => t.at <= simT);
@@ -377,14 +400,30 @@
     setTimeout(() => { el.className = 'banner'; }, 1300 / speed);
   }
 
+  // Referee holds the card up; the booked player's token flashes in the card colour.
   function showCard(kind, k) {
-    if (skipping) return;
-    const el = $('#ref-card');
+    if (skipping) return Promise.resolve();
     const o = agents[k];
-    el.className = 'ref-card is-on ref-card--' + (kind === 'yellow' ? 'yellow' : 'red');
-    el.style.left = (o.p.x / W) * 100 + '%';
-    el.style.top = (o.p.y / H) * 100 + '%';
-    setTimeout(() => { el.className = 'ref-card'; }, 1400 / speed);
+    const card = ref.card; // lives inside the referee element, so it moves with him
+    card.className = 'ref-card';
+    void card.offsetWidth; // restart the animation
+    card.className = 'ref-card is-on ref-card--' + kind;
+    ref.el.classList.add('is-showing');
+    o.el.classList.add('is-booked', 'is-booked--' + kind);
+    // big centre overlay: the card itself + the call + the player's name
+    const show = $('#card-show');
+    show.className = 'card-show';
+    void show.offsetWidth;
+    show.className = 'card-show is-on card-show--' + kind;
+    show.querySelector('b').textContent = kind === 'yellow' ? 'YELLOW CARD' : 'RED CARD';
+    show.querySelector('small').textContent = `${o.side === 'home' ? teams.home.name : teams.away.name} · ${playerOf(o.side, o.i).ko}`;
+    return new Promise((resolve) => setTimeout(() => {
+      show.className = 'card-show';
+      card.className = 'ref-card';
+      ref.el.classList.remove('is-showing');
+      o.el.classList.remove('is-booked', 'is-booked--yellow', 'is-booked--red');
+      resolve();
+    }, Math.max(1100, 1500 / speed)));
   }
 
   function log(minute, text, side, strong) {
@@ -413,7 +452,7 @@
   function clearOverrides() {
     Object.values(agents).forEach((o) => {
       o.ov = null; o.run = null; o.spot = null;
-      o.el.classList.remove('is-dive-l', 'is-dive-r', 'is-down');
+      o.el.classList.remove('is-dive-l', 'is-dive-r', 'is-down', 'is-throw');
     });
   }
 
@@ -493,7 +532,8 @@
     live.possession = S;
     const setPiece = ev.kind === 'corner' || ev.kind === 'fkcross';
     const isGK = agents[fromK].role === 'GK';
-    if (!setPiece) await carry(fromK, S, isGK ? rand(0.6, 1.2) : rand(0.3, 1.1), isGK ? 2 : 6);
+    if (ev.kind === 'throw') { ball.h = 2.1; agents[fromK].el.classList.remove('is-throw'); }
+    else if (!setPiece) await carry(fromK, S, isGK ? rand(0.6, 1.2) : rand(0.3, 1.1), isGK ? 2 : 6);
     else holdBy(fromK);
     live.kickoff = false;
 
@@ -521,7 +561,8 @@
     const prof = PASS[ev.kind] || PASS.short;
     const setPiece = ev.kind === 'corner' || ev.kind === 'fkcross';
     live.possession = S;
-    if (!setPiece) await carry(fromK, S, rand(0.3, 0.9));
+    if (ev.kind === 'throw') { ball.h = 2.1; agents[fromK].el.classList.remove('is-throw'); }
+    else if (!setPiece) await carry(fromK, S, rand(0.3, 0.9));
     else holdBy(fromK);
     live.kickoff = false;
 
@@ -542,6 +583,16 @@
     await kick(C, { ...prof, arrive: 8, h1: aerial ? (keeper ? 2.2 : 1.8) : 0, then: { mode: keeper ? 'held' : 'dead', holder: byK } });
     if (setPiece) { live.setPiece = null; Object.values(agents).forEach((o) => { o.spot = null; }); }
     live.possession = D;
+    if (ev.out) {
+      // touched out over the sideline
+      const out = { x: clamp(C.x + rand(-5, 5), 2, W - 2), y: C.y < H / 2 ? -1.2 : H + 1.2 };
+      d.ov = null;
+      await kick(out, aerial ? { air: true, T: 0.6, peakAbs: 1.5, h0: ball.h, h1: 0 } : { air: false, arrive: 4, dec: 4 });
+      live.lastOut = { ...out };
+      ball.alpha = 0;
+      r.ov = null;
+      return;
+    }
     if (aerial && !keeper && !skipping) {
       // headed clear, bounces, then controlled
       const away = inPitch({ x: C.x - dirOf(S) * rand(8, 16), y: C.y + rand(-6, 6) });
@@ -646,14 +697,22 @@
     banner('FOUL');
     const sp = playerOf(ev.side, ev.by).short;
     if (ev.card) {
-      await simWait(0.6);
+      // referee runs in, stops beside the player, card goes up
+      ref.ov = inPitch({ x: f.p.x - dirOf(ev.side) * 2.2, y: f.p.y + (f.p.y < H / 2 ? 2.2 : -2.2) }, 1);
+      await simWait(1.4);
       const red = ev.card === 'red' || ev.card === 'second-yellow';
-      showCard(red ? 'red' : 'yellow', foulK);
       const c = live.cards[ev.side];
-      if (ev.card === 'yellow') c.yellow++;
-      if (ev.card === 'second-yellow') { c.yellow++; c.red++; }
-      if (ev.card === 'red') c.red++;
-      setScore();
+      if (ev.card !== 'red') {
+        c.yellow++;
+        setScore();
+        await showCard('yellow', foulK);
+      }
+      if (red) {
+        c.red++;
+        setScore();
+        await showCard('red', foulK);
+      }
+      ref.ov = null;
       const label = ev.card === 'yellow' ? '🟨 경고' : ev.card === 'second-yellow' ? '🟨🟥 경고 누적 퇴장' : '🟥 퇴장';
       log(ev.minute, `${sp} ${label} (반칙 — ${playerOf(ev.victimSide, ev.on).short})`, ev.side, red);
       if (red) {
@@ -732,6 +791,28 @@
     holdBy(k);
   }
 
+  // Ball went out over the touchline: the taker fetches it and holds it overhead.
+  async function doThrowin(ev) {
+    const k = key(ev.side, ev.holder);
+    const t = agents[k];
+    const top = live.lastOut ? live.lastOut.y < H / 2 : (ev.side === 'home' ? ev.y < 50 : ev.y >= 50);
+    const x = live.lastOut ? clamp(live.lastOut.x, 3, W - 3) : simToPitch(ev.side, ev.x, 50).x;
+    const spot = { x, y: top ? 0.2 : H - 0.2 };
+    live.lastOut = null;
+    live.possession = ev.side;
+    Object.assign(ball, { p: { ...spot }, h: 0, mode: 'dead', holder: null, alpha: 0, dest: null });
+    t.ov = { t: { x, y: top ? 0.6 : H - 0.6 }, spd: 'sprint' };
+    if (Math.random() < 0.4) log(ev.minute, `${teams[ev.side].name} 스로인 — ${playerOf(ev.side, ev.holder).short}`, ev.side);
+    await simWait(1.6);
+    ball.alpha = 1;
+    ball.mode = 'hover';
+    ball.holder = k;
+    ball.h = 2.1;
+    t.el.classList.add('is-throw');
+    await simWait(0.7);
+    t.ov = null;
+  }
+
   async function step(ev, next) {
     if (ev.minute !== undefined) $('#clock').textContent = ev.minute + "'";
     const name = (side, i) => playerOf(side, i).short;
@@ -759,6 +840,7 @@
         live.setPiece = null;
         const spot = { x: ev.side === 'home' ? 5.5 : W - 5.5, y: H / 2 + rand(-6, 6) };
         g.ov = { t: spot, spd: 4 };
+        if (Math.random() < 0.5) log(ev.minute, `${teams[ev.side].name} 골킥 — ${playerOf(ev.side, ev.holder).short}`, ev.side);
         Object.assign(ball, { p: { ...spot }, h: 0, mode: 'dead', holder: null, alpha: 0 });
         await simWait(1.2);
         ball.alpha = 1;
@@ -782,6 +864,8 @@
         return doPenalty(ev);
       case 'corner':
         return doCorner(ev);
+      case 'throwin':
+        return doThrowin(ev);
       case 'goal': {
         await doShot(ev);
         live.score = { ...ev.score };
@@ -923,7 +1007,7 @@
     timers = [];
     result = Sim.simulate(home.lineup, away.lineup, (Math.random() * 2 ** 32) >>> 0, { home: home.tactic, away: away.tactic });
     Object.assign(live, {
-      score: { home: 0, away: 0 }, possession: 'home', celebrate: null, kickoff: true, setPiece: null,
+      score: { home: 0, away: 0 }, possession: 'home', celebrate: null, kickoff: true, setPiece: null, lastOut: null,
       cards: { home: { yellow: 0, red: 0 }, away: { yellow: 0, red: 0 } },
     });
     Object.assign(ball, { p: { x: W / 2, y: H / 2 }, h: 0, mode: 'dead', holder: null, fl: null, alpha: 1, dest: null });
@@ -941,6 +1025,11 @@
     for (let i = 0; i < 4; i++) tr.append(Object.assign(document.createElement('i'), { className: 'trail-dot' }));
     setScore();
     buildAgents();
+    const refEl = document.createElement('div');
+    refEl.className = 'referee';
+    refEl.innerHTML = '<span></span><em>주심</em><i class="ref-card"></i>';
+    $('#tokens').append(refEl);
+    Object.assign(ref, { el: refEl, card: refEl.querySelector('.ref-card'), p: { x: W / 2 - 6, y: H / 2 + 10 }, v: { x: 0, y: 0 }, ov: null });
     window.scrollTo({ top: 0 });
     requestAnimationFrame(() => { pxPerM = ($('#pitch').clientWidth || 1155) / W; });
 

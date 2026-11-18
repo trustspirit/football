@@ -73,7 +73,7 @@
   function newStats() {
     return {
       passes: 0, completed: 0, shots: 0, onTarget: 0, goals: 0,
-      fouls: 0, yellows: 0, reds: 0, corners: 0, freekicks: 0, penalties: 0,
+      fouls: 0, yellows: 0, reds: 0, corners: 0, freekicks: 0, penalties: 0, throwins: 0,
     };
   }
 
@@ -288,6 +288,27 @@
         shoot('penalty', taker);
         return;
       }
+      if (sp.type === 'throwin') {
+        // Taken by the nearest outfield player; thrown to a nearby team-mate.
+        st.throwins++;
+        const own = (o) => o.e.slot.role !== 'GK';
+        const near = (o) => (o.e.slot.x - sp.x) ** 2 + (o.e.slot.y - sp.y) ** 2;
+        const pool = active(side).filter(own).sort((a, b) => near(a) - near(b));
+        const taker = pool[0].i;
+        events.push({ type: 'throwin', side, holder: taker, x: sp.x, y: sp.y, minute: Math.floor(minute) });
+        const to = pool[1 + Math.floor(rng() * Math.min(3, pool.length - 1))] || pool[0];
+        minute += 0.3 + rng() * 0.2;
+        if (rng() < 0.88) {
+          events.push({ type: 'pass', kind: 'throw', side, from: taker, to: to.i, minute: Math.floor(minute) });
+          lastPasser = taker;
+          holder = to.i;
+        } else {
+          const by = nearestOpponent(other(side), 100 - to.e.slot.x, 100 - to.e.slot.y, (e) => e.slot.role !== 'GK');
+          events.push({ type: 'intercept', kind: 'throw', side, from: taker, to: to.i, by, minute: Math.floor(minute) });
+          turnover(other(side), by);
+        }
+        return;
+      }
       if (sp.type === 'corner') {
         st.corners++;
         const taker = bestBy(side, (e) => e.player.fk, (e) => e.slot.role !== 'GK');
@@ -404,6 +425,15 @@
         events.push({ type: 'intercept', kind, side, from: holder, to: target.i, by, minute: Math.floor(minute) });
         // a cross cleared behind -> corner
         if (kind === 'cross' && rng() < 0.3) { setPiece = { type: 'corner', side }; continue; }
+        // knocked out over the touchline -> throw-in to the defending side
+        const pOut = (kind === 'long' || kind === 'switch' || kind === 'punt') ? 0.3 : Math.abs(t.y - 50) >= 25 ? 0.2 : 0.06;
+        const byGK = T[oppSide].lineup[by].slot.role === 'GK';
+        if (!byGK && rng() < pOut) {
+          events[events.length - 1].out = true;
+          // spot in the throwing team's own frame (depth/width 0..100)
+          setPiece = { type: 'throwin', side: oppSide, x: clamp(100 - t.x, 3, 97), y: t.y >= 50 ? 0 : 100 };
+          continue;
+        }
         turnover(oppSide, by);
       }
     }
