@@ -1,11 +1,11 @@
 // Service worker: offline app shell + cached player photos and fonts.
-const VERSION = 'mdc-v5';
+const VERSION = 'mdc-v6';
 const SHELL = [
   './', 'index.html', 'style.css', 'manifest.webmanifest',
-  'js/players.js', 'js/formations.js', 'js/photos.js', 'js/sim.js', 'js/match.js', 'js/draft.js',
+  'js/players.js', 'js/formations.js', 'js/photos.js', 'js/sim.js', 'js/options.js', 'js/sound.js', 'js/match.js', 'js/draft.js',
   'icons/icon.svg', 'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-maskable-512.png',
 ];
-const RUNTIME = 'mdc-runtime-v1';
+const RUNTIME = 'mdc-runtime-v2'; // v1 held opaque photo responses that break CORS <img> loads
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));

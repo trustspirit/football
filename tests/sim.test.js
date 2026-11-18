@@ -118,3 +118,49 @@ test('every foul is followed by its free kick or penalty, and throw-ins by a thr
     });
   }
 });
+
+test('stoppage time is announced in both halves and played', () => {
+  const r = simulate(strong, weaker, 21);
+  const added = r.events.filter((e) => e.type === 'added');
+  assert.equal(added.length, 2);
+  assert.equal(added[0].minute, 45);
+  assert.equal(added[1].minute, 90);
+  const end = r.events.at(-1);
+  assert.equal(end.minute, 90);
+  assert.ok(end.plus >= 1, `end at 90+${end.plus}`);
+  // no event before the break is labelled as second-half time
+  const half = r.events.findIndex((e) => e.type === 'half');
+  assert.ok(r.events.slice(0, half).every((e) => e.minute === undefined || e.minute <= 45));
+});
+
+test('stamina option: tired players are substituted from the bench (max 5)', () => {
+  const bench = { home: ['alisson', 'dias', 'pedri', 'kane', 'salah'].map((id) => P[id]), away: ['raya', 'gabriel', 'odegaard', 'saka', 'kvara'].map((id) => P[id]) };
+  let total = 0;
+  for (let s = 1; s <= 40; s++) {
+    const r = simulate(strong, weaker, s, null, { stamina: true, bench });
+    const subs = r.events.filter((e) => e.type === 'sub');
+    total += subs.length;
+    for (const side of ['home', 'away']) assert.ok(subs.filter((e) => e.side === side).length <= 5);
+    subs.forEach((e) => assert.ok(e.minute >= 58));
+  }
+  assert.ok(total / 40 >= 2, `avg subs ${total / 40}`);
+  // the caller's lineup is never mutated
+  assert.equal(strong[9].player.id, 'haaland');
+  assert.equal(strong[9].energy, undefined);
+  // without the option there are no subs
+  assert.equal(simulate(strong, weaker, 3, null, { bench }).events.filter((e) => e.type === 'sub').length, 0);
+});
+
+test('ratings: everyone who played is rated 3-10, goals are credited, there is a man of the match', () => {
+  const bench = { home: ['pedri', 'kane'].map((id) => P[id]), away: ['saka'].map((id) => P[id]) };
+  for (let s = 1; s <= 30; s++) {
+    const r = simulate(strong, weaker, s, null, { stamina: true, bench });
+    const { players, mom } = r.ratings;
+    assert.ok(players.length >= 22);
+    players.forEach((p) => assert.ok(p.r >= 3 && p.r <= 10, `${p.id} ${p.r}`));
+    assert.ok(players.some((p) => p.id === mom));
+    r.events.filter((e) => e.type === 'goal').forEach((g) => assert.ok(P[g.pid], 'goal has scorer id'));
+    const goals = players.reduce((n, p) => n + p.goals, 0);
+    assert.equal(goals, r.score.home + r.score.away);
+  }
+});

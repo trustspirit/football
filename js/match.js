@@ -97,6 +97,20 @@
 
   const activeAgents = () => Object.values(agents).filter((o) => !o.gone);
 
+  // Top speed from pace: 50 -> 6.6 m/s, 97 -> ~9.4 m/s; jogging is ~62 % of that.
+  function setPace(o, player) {
+    o.sprint = 6.6 + (((player.pac ?? 75) - 50) / 50) * 3;
+    o.jog = o.sprint * 0.62;
+    o.phy = player.phy ?? 70;
+  }
+  // Stamina option: legs get heavier with minutes played (up to -14 %, less for strong players).
+  function tiredness(o) {
+    if (!live.stamina || o.role === 'GK') return 1;
+    const played = Math.max(0, (live.minute || 0) - (o.since || 0));
+    const resist = clamp(1 - (o.phy - 60) / 70, 0.35, 1);
+    return 1 - 0.14 * Math.min(1, played / 95) * resist;
+  }
+
   function plan() {
     const list = activeAgents();
     list.forEach((o) => {
@@ -159,6 +173,7 @@
         o.max = o.ov.spd === 'sprint' ? o.sprint : o.ov.spd;
         o.acc = o.ov.acc || 14;
       }
+      if (!o.off) o.max *= tiredness(o);
     });
   }
 
@@ -174,7 +189,7 @@
       let dvy = (d ? (dy / d) * want : 0) - o.v.y;
       const dv = Math.hypot(dvx, dvy);
       const maxDv = o.acc * dt;
-      if (dv > maxDv) { dvx *= maxDv / dv; dvy *= maxDv / dv; }
+      if (dv > maxDv && dv > 0) { dvx *= maxDv / dv; dvy *= maxDv / dv; }
       o.v.x += dvx;
       o.v.y += dvy;
     });
@@ -284,6 +299,8 @@
     ball.mode = 'flight';
     ball.holder = null;
     ball.dest = { ...to };
+    // boot on ball: a proper strike, not bounces/rolls (those start at ground level with low peaks)
+    if (!skipping && !o.silent) Sound.kick(clamp(D / T / 30, 0.15, 1));
     return new Promise((resolve) => {
       f.resolve = resolve;
       ball.fl = f;
@@ -297,12 +314,12 @@
     const ux = dir.x;
     const uy = dir.y;
     const b1 = inPitch({ x: landing.x + ux * 2.4, y: landing.y + uy * 2.4 });
-    await kick(b1, { air: true, T: 0.42, peakAbs: 0.7, h0: 0, h1: 0, then: { mode: 'dead' } });
+    await kick(b1, { air: true, T: 0.42, peakAbs: 0.7, h0: 0, h1: 0, then: { mode: 'dead' }, silent: true });
     const b2 = inPitch({ x: b1.x + ux * 1.3, y: b1.y + uy * 1.3 });
-    await kick(b2, { air: true, T: 0.24, peakAbs: 0.22, h0: 0, h1: 0, then: { mode: 'dead' } });
+    await kick(b2, { air: true, T: 0.24, peakAbs: 0.22, h0: 0, h1: 0, then: { mode: 'dead' }, silent: true });
     if (toK) {
       const f = footOf(toK);
-      await kick(f, { air: false, arrive: 1.5, dec: 4, then: { mode: 'held', holder: toK } });
+      await kick(f, { air: false, arrive: 1.5, dec: 4, then: { mode: 'held', holder: toK }, silent: true });
     }
   }
 
@@ -312,32 +329,27 @@
   };
 
   // ---------- rendering ----------
+  // Everything is positioned with translate3d in px (pitch meters * pxPerM): moving
+  // `left/top` would trigger layout for ~25 elements every frame, which tablets feel.
+  const px = (m) => (m * pxPerM).toFixed(1);
   function draw() {
     activeAgents().forEach((o) => {
       const sp = Math.hypot(o.v.x, o.v.y);
       const bob = Math.sin(o.stride) * Math.min(1, sp / 6) * 1.6;
-      o.el.style.left = (o.p.x / W) * 100 + '%';
-      o.el.style.top = (o.p.y / H) * 100 + '%';
-      o.el.style.transform = `translate(-50%, -50%) translateY(${bob}px)`;
-      o.el.classList.toggle('has-ball', ball.holder === o.key && ball.mode === 'held');
+      o.el.style.transform = `translate3d(${px(o.p.x)}px, ${(o.p.y * pxPerM + bob).toFixed(1)}px, 0) translate(-50%, -50%)`;
+      const has = ball.holder === o.key && ball.mode === 'held';
+      if (o.hasBall !== has) { o.hasBall = has; o.el.classList.toggle('has-ball', has); }
     });
-    if (ref.el) {
-      ref.el.style.left = (ref.p.x / W) * 100 + '%';
-      ref.el.style.top = (ref.p.y / H) * 100 + '%';
-    }
+    if (ref.el) ref.el.style.transform = `translate3d(${px(ref.p.x)}px, ${px(ref.p.y)}px, 0) translate(-50%, -50%)`;
     const b = $('#ball');
     const s = $('#ball-shadow');
     const lift = ball.h * pxPerM * 1.1;
-    const left = (ball.p.x / W) * 100 + '%';
-    const top = (ball.p.y / H) * 100 + '%';
-    b.style.left = left;
-    b.style.top = top;
+    const bx = px(ball.p.x);
+    const by = px(ball.p.y);
     b.style.opacity = String(ball.alpha);
-    b.style.transform = `translate(-50%, -50%) translateY(${-lift}px) scale(${1 + ball.h * 0.09}) rotate(${ball.spin}deg)`;
-    s.style.left = left;
-    s.style.top = top;
+    b.style.transform = `translate3d(${bx}px, ${(ball.p.y * pxPerM - lift).toFixed(1)}px, 0) translate(-50%, -50%) scale(${(1 + ball.h * 0.09).toFixed(3)}) rotate(${ball.spin.toFixed(0)}deg)`;
     s.style.opacity = String(ball.alpha * Math.max(0.12, 0.55 - ball.h * 0.07));
-    s.style.transform = `translate(-50%, -50%) scale(${1 + ball.h * 0.14})`;
+    s.style.transform = `translate3d(${bx}px, ${by}px, 0) translate(-50%, -50%) scale(${(1 + ball.h * 0.14).toFixed(3)})`;
 
     // motion trail for fast balls
     trail.unshift({ x: ball.p.x, y: ball.p.y, lift, fast: ball.speed > 14 && ball.mode === 'flight' });
@@ -347,16 +359,15 @@
       const t = trail[i + 1];
       const d = dots[i];
       if (!t || !t.fast || skipping) { d.style.opacity = '0'; continue; }
-      d.style.left = (t.x / W) * 100 + '%';
-      d.style.top = (t.y / H) * 100 + '%';
-      d.style.transform = `translate(-50%, -50%) translateY(${-t.lift}px) scale(${1 - i * 0.15})`;
+      d.style.transform = `translate3d(${px(t.x)}px, ${(t.y * pxPerM - t.lift).toFixed(1)}px, 0) translate(-50%, -50%) scale(${1 - i * 0.15})`;
       d.style.opacity = String(0.35 - i * 0.07);
     }
   }
 
   function frame(now, gen) {
     if (gen !== rafGen) return;
-    const real = Math.min(0.05, (now - last) / 1000);
+    // rAF timestamps can be slightly earlier than performance.now() taken in start(): never go back in time
+    const real = clamp((now - last) / 1000, 0, 0.05);
     last = now;
     const total = real * speed * TIME_SCALE;
     const n = Math.ceil(total / 0.04) || 1;
@@ -430,6 +441,9 @@
       resolve();
     }, Math.max(1100, 1500 / speed)));
   }
+
+  // Event minute as shown on the clock: 45+2, 90+4 in stoppage time.
+  const mm = (ev) => (ev.plus ? `${ev.minute}+${ev.plus}` : String(ev.minute));
 
   function log(minute, text, side, strong) {
     const li = document.createElement('li');
@@ -610,7 +624,7 @@
     d.ov = null;
     if (Math.random() < 0.25 || setPiece) {
       const what = keeper ? '공중볼 캐치' : aerial ? '헤딩 클리어' : '가로채기';
-      log(ev.minute, `${playerOf(D, ev.by).short} ${what}`, D);
+      log(mm(ev), `${playerOf(D, ev.by).short} ${what}`, D);
     }
   }
 
@@ -675,7 +689,7 @@
     } else if (ev.type === 'goal') {
       await kick(target, { ...opts, then: { mode: 'dead' } });
       const net = { x: lineX + dirOf(S) * 1.5, y: gy + rand(-0.6, 0.6) };
-      await kick(net, { air: true, T: 0.16, h0: ball.h, h1: Math.max(0.2, ball.h * 0.5), peakAbs: 0, then: { mode: 'dead' } });
+      await kick(net, { air: true, T: 0.16, h0: ball.h, h1: Math.max(0.2, ball.h * 0.5), peakAbs: 0, then: { mode: 'dead' }, silent: true });
     } else {
       // wide, over, or deflected behind
       const out = ev.deflected
@@ -704,6 +718,7 @@
     ball.mode = 'dead';
     ball.holder = null;
     banner('FOUL');
+    Sound.whistle('short');
     const sp = playerOf(ev.side, ev.by).short;
     if (ev.card) {
       // referee runs in, stops beside the player, card goes up
@@ -723,14 +738,14 @@
       }
       ref.ov = null;
       const label = ev.card === 'yellow' ? '🟨 경고' : ev.card === 'second-yellow' ? '🟨🟥 경고 누적 퇴장' : '🟥 퇴장';
-      log(ev.minute, `${sp} ${label} (반칙 — ${playerOf(ev.victimSide, ev.on).short})`, ev.side, red);
+      log(mm(ev), `${sp} ${label} (반칙 — ${playerOf(ev.victimSide, ev.on).short})`, ev.side, red);
       if (red) {
         f.off = true;
         f.ov = null;
         f.el.classList.add('is-off-pitch');
       }
     } else if (Math.random() < 0.35) {
-      log(ev.minute, `${sp} 반칙`, ev.side);
+      log(mm(ev), `${sp} 반칙`, ev.side);
     }
     await simWait(0.9);
     v.el.classList.remove('is-down');
@@ -750,7 +765,7 @@
     const gk = agents[gkKey(other(ev.side))];
     gk.ov = { t: { x: goalLineX(ev.side) - dirOf(ev.side) * 1.2, y: 34 + (spot.y < 34 ? 1.5 : -1.5) }, spd: 4 };
     const dangerous = ev.direct || ev.x >= 55;
-    if (dangerous) log(ev.minute, `${teams[ev.side].name} ${ev.direct ? '직접 프리킥' : '프리킥'} — ${playerOf(ev.side, ev.holder).short}`, ev.side);
+    if (dangerous) log(mm(ev), `${teams[ev.side].name} ${ev.direct ? '직접 프리킥' : '프리킥'} — ${playerOf(ev.side, ev.holder).short}`, ev.side);
     await simWait(dangerous ? 2.2 : 1);
     t.ov = null;
     gk.ov = null;
@@ -777,7 +792,8 @@
     const gk = agents[gkKey(other(ev.side))];
     gk.ov = { t: { x: goalLineX(ev.side) - dirOf(ev.side) * 0.6, y: 34 }, spd: 4 };
     banner('PENALTY!', ev.side);
-    log(ev.minute, `페널티킥 선언 — 키커 ${playerOf(ev.side, ev.holder).short}`, ev.side, true);
+    Sound.whistle('short');
+    log(mm(ev), `페널티킥 선언 — 키커 ${playerOf(ev.side, ev.holder).short}`, ev.side, true);
     await simWait(2.6);
     t.ov = { t: { ...spot }, spd: 4 };
     await simWait(0.5);
@@ -797,7 +813,7 @@
     t.ov = { t: { x: spot.x - dirOf(ev.side) * 0.8, y: spot.y + (ev.top ? 0.8 : -0.8) }, spd: 'sprint' };
     const gk = agents[gkKey(other(ev.side))];
     gk.ov = { t: { x: lineX - dirOf(ev.side) * 1.5, y: 34 + (ev.top ? -1.5 : 1.5) }, spd: 4 };
-    log(ev.minute, `${teams[ev.side].name} 코너킥 — ${playerOf(ev.side, ev.holder).short}`, ev.side);
+    log(mm(ev), `${teams[ev.side].name} 코너킥 — ${playerOf(ev.side, ev.holder).short}`, ev.side);
     await simWait(2.4);
     t.ov = null;
     gk.ov = null;
@@ -815,7 +831,7 @@
     live.possession = ev.side;
     Object.assign(ball, { p: { ...spot }, h: 0, mode: 'dead', holder: null, alpha: 0, dest: null });
     t.ov = { t: { x, y: top ? 0.6 : H - 0.6 }, spd: 'sprint' };
-    if (Math.random() < 0.4) log(ev.minute, `${teams[ev.side].name} 스로인 — ${playerOf(ev.side, ev.holder).short}`, ev.side);
+    if (Math.random() < 0.4) log(mm(ev), `${teams[ev.side].name} 스로인 — ${playerOf(ev.side, ev.holder).short}`, ev.side);
     await simWait(1.6);
     ball.alpha = 1;
     ball.mode = 'hover';
@@ -826,8 +842,31 @@
     t.ov = null;
   }
 
+  // Substitution: the tired player jogs off, the token turns into the new player.
+  async function doSub(ev) {
+    const o = agents[key(ev.side, ev.i)];
+    const outP = PLAYER_BY_ID[ev.out];
+    const inP = PLAYER_BY_ID[ev.in];
+    teams[ev.side].lineup[ev.i] = { ...teams[ev.side].lineup[ev.i], player: inP };
+    log(mm(ev), `🔁 교체 ${inP.short} IN · ${outP.short} OUT`, ev.side);
+    if (!skipping) {
+      banner(`SUB · ${inP.short}`, ev.side);
+      o.el.classList.add('is-sub');
+      await simWait(0.9);
+    }
+    o.el.querySelector('.photo').outerHTML = Photos.html(inP);
+    o.el.querySelector('em').textContent = inP.short;
+    setPace(o, inP);
+    o.since = live.minute;
+    o.el.classList.remove('is-sub');
+    if (!skipping) await simWait(0.6);
+  }
+
   async function step(ev, next) {
-    if (ev.minute !== undefined) $('#clock').textContent = ev.minute + "'";
+    if (ev.minute !== undefined) {
+      $('#clock').textContent = mm(ev) + "'";
+      live.minute = ev.minute + (ev.plus || 0);
+    }
     const name = (side, i) => playerOf(side, i).short;
 
     switch (ev.type) {
@@ -840,7 +879,10 @@
         Object.assign(ball, { p: { x: W / 2, y: H / 2 }, h: 0, mode: 'dead', holder: null, fl: null, alpha: 1, dest: null });
         const k = key(ev.side, ev.holder);
         agents[k].ov = { t: { x: W / 2 - dirOf(ev.side) * 0.7, y: H / 2 }, spd: 5 };
-        if (ev.minute === 0 || ev.minute === 45) log(ev.minute, `${teams[ev.side].name} 킥오프`, ev.side);
+        if (ev.minute === 0 || ev.minute === 45) {
+          log(mm(ev), `${teams[ev.side].name} 킥오프`, ev.side);
+          Sound.whistle('short');
+        }
         await simWait(ev.minute === 0 ? 1.2 : 3.2);
         agents[k].ov = null;
         holdBy(k);
@@ -853,7 +895,7 @@
         live.setPiece = null;
         const spot = { x: ev.side === 'home' ? 5.5 : W - 5.5, y: H / 2 + rand(-6, 6) };
         g.ov = { t: spot, spd: 4 };
-        if (Math.random() < 0.5) log(ev.minute, `${teams[ev.side].name} 골킥 — ${playerOf(ev.side, ev.holder).short}`, ev.side);
+        if (Math.random() < 0.5) log(mm(ev), `${teams[ev.side].name} 골킥 — ${playerOf(ev.side, ev.holder).short}`, ev.side);
         Object.assign(ball, { p: { ...spot }, h: 0, mode: 'dead', holder: null, alpha: 0 });
         await simWait(1.2);
         ball.alpha = 1;
@@ -879,6 +921,17 @@
         return doCorner(ev);
       case 'throwin':
         return doThrowin(ev);
+      case 'added': {
+        // fourth official's board
+        const el = $('#added');
+        el.textContent = `+${ev.extra}`;
+        el.hidden = false;
+        log(mm(ev), `추가 시간 ${ev.extra}분`, null);
+        banner(`+${ev.extra}'`);
+        return simWait(1.2);
+      }
+      case 'sub':
+        return doSub(ev);
       case 'goal': {
         await doShot(ev);
         live.score = { ...ev.score };
@@ -886,9 +939,10 @@
         const how = ev.kind === 'shot' ? '' : SHOT_KO[ev.kind];
         const assist = ev.assist !== null && ev.assist !== undefined ? `도움 ${name(ev.side, ev.assist)}` : '';
         const extra = [how, assist].filter(Boolean).join(', ');
-        log(ev.minute, `⚽ 골! ${playerOf(ev.side, ev.from).ko}${extra ? ` (${extra})` : ''}`, ev.side, true);
+        log(mm(ev), `⚽ 골! ${playerOf(ev.side, ev.from).ko}${extra ? ` (${extra})` : ''}`, ev.side, true);
         const head = { header: 'HEADER! ', long: 'WHAT A STRIKE! ', freekick: 'FREE KICK! ', penalty: 'PENALTY GOAL — ' }[ev.kind] || 'GOAL — ';
         banner(head + name(ev.side, ev.from), ev.side);
+        Sound.roar();
         const pitch = $('#pitch');
         pitch.classList.add('is-goal', ev.side === 'home' ? 'net-r' : 'net-l');
         const gy = goalY(ev.side, ev.aimY);
@@ -904,26 +958,32 @@
       }
       case 'save':
         await doShot(ev, next);
-        log(ev.minute, `${name(ev.side, ev.from)}의 ${SHOT_KO[ev.kind]} — ${name(other(ev.side), ev.keeper)} ${ev.caught ? '캐치' : '선방'}`, ev.side);
+        log(mm(ev), `${name(ev.side, ev.from)}의 ${SHOT_KO[ev.kind]} — ${name(other(ev.side), ev.keeper)} ${ev.caught ? '캐치' : '선방'}`, ev.side);
         banner('SAVE!');
+        Sound.ooh();
         return simWait(0.6);
       case 'miss':
         await doShot(ev);
-        log(ev.minute, `${name(ev.side, ev.from)}의 ${SHOT_KO[ev.kind]}${ev.deflected ? '이 수비 맞고 굴절' : ev.over ? '이 크로스바 위로' : '이 빗나감'}`, ev.side);
+        if (!ev.deflected) Sound.ooh();
+        log(mm(ev), `${name(ev.side, ev.from)}의 ${SHOT_KO[ev.kind]}${ev.deflected ? '이 수비 맞고 굴절' : ev.over ? '이 크로스바 위로' : '이 빗나감'}`, ev.side);
         return simWait(0.6);
       case 'half':
         clearOverrides();
         live.setPiece = null;
         live.kickoff = true;
         ball.mode = 'dead'; ball.holder = null;
+        $('#added').hidden = true;
+        Sound.whistle('half');
         log(45, `하프타임 ${live.score.home} : ${live.score.away}`, null, true);
         banner('HALF TIME');
         return simWait(2.5);
       case 'end':
         clearOverrides();
         ball.mode = 'dead'; ball.holder = null;
-        $('#clock').textContent = "90'";
-        log(90, `경기 종료 ${ev.score.home} : ${ev.score.away}`, null, true);
+        $('#added').hidden = true;
+        Sound.whistle('end');
+        Sound.crowdStop();
+        log(mm(ev), `경기 종료 ${ev.score.home} : ${ev.score.away}`, null, true);
         return simWait(1);
       default:
         return undefined;
@@ -958,7 +1018,7 @@
     const goals = events.filter((e) => e.type === 'goal');
     const tag = { header: ' (헤딩)', long: ' (중거리)', freekick: ' (프리킥)', penalty: ' (PK)' };
     const scorers = (side) => goals.filter((g) => g.side === side)
-      .map((g) => `${playerOf(side, g.from).short} ${g.minute}'${tag[g.kind] || ''}`)
+      .map((g) => `${PLAYER_BY_ID[g.pid].short} ${mm(g)}'${tag[g.kind] || ''}`)
       .join(', ') || '—';
 
     const mk = (tg, cls, text) => { const el = document.createElement(tg); el.className = cls; el.textContent = text; return el; };
@@ -993,9 +1053,61 @@
       tr.append(mk('td', 'h', String(hv)), mk('th', '', label), mk('td', 'a', String(av)));
       table.append(tr);
     });
+    renderRatings(mk);
+    showTab('stats');
     $('#result').hidden = false;
     $('#rematch').focus({ preventScroll: true });
   }
+
+  // Man of the match + per-player ratings (home | away), starters first, subs after.
+  function renderRatings(mk) {
+    const { players, mom } = result.ratings;
+    const m = players.find((p) => p.id === mom);
+    const momEl = $('#res-mom');
+    momEl.innerHTML = '';
+    if (m) {
+      const pl = PLAYER_BY_ID[m.id];
+      const facts = [m.goals && `${m.goals}골`, m.assists && `${m.assists}도움`, m.saves && `${m.saves}선방`].filter(Boolean).join(' · ');
+      momEl.className = `result__mom result__mom--${m.side}`;
+      momEl.innerHTML = Photos.html(pl, 'mom__photo');
+      const body = mk('span', 'mom__body', '');
+      body.append(mk('small', '', 'MAN OF THE MATCH'), mk('b', '', pl.ko), mk('i', '', `${teams[m.side].name}${facts ? ' · ' + facts : ''}`));
+      momEl.append(body, mk('strong', 'mom__rating', m.r.toFixed(1)));
+    }
+    const wrap = $('#res-ratings');
+    wrap.innerHTML = '';
+    ['home', 'away'].forEach((side) => {
+      const col = mk('div', `rt rt--${side}`, '');
+      col.append(mk('h3', '', teams[side].name));
+      const list = players.filter((p) => p.side === side)
+        .sort((a, b) => (a.subIn != null) - (b.subIn != null) || b.r - a.r);
+      list.forEach((p) => {
+        const pl = PLAYER_BY_ID[p.id];
+        const row = mk('div', 'rt__row' + (p.id === mom ? ' is-mom' : ''), '');
+        const tags = [
+          p.goals ? '⚽'.repeat(p.goals) : '',
+          p.assists ? '🅰'.repeat(p.assists) : '',
+          p.cards.includes('R') ? '🟥' : p.cards.includes('Y') ? '🟨' : '',
+          p.subIn != null ? `↑${p.subIn}'` : '',
+          p.subOut != null ? `↓${p.subOut}'` : '',
+        ].join('');
+        const r = mk('b', 'rt__r', p.r.toFixed(1));
+        r.dataset.band = p.r >= 8 ? 'hi' : p.r >= 7 ? 'good' : p.r < 6 ? 'low' : 'mid';
+        row.append(mk('span', 'rt__pos', pl.pos), mk('span', 'rt__name', pl.short), mk('span', 'rt__tags', tags), r);
+        col.append(row);
+      });
+      wrap.append(col);
+    });
+  }
+  function showTab(name) {
+    document.querySelectorAll('[data-tab]').forEach((b) => {
+      b.classList.toggle('is-on', b.dataset.tab === name);
+      b.setAttribute('aria-selected', String(b.dataset.tab === name));
+    });
+    $('#res-stats').hidden = name !== 'stats';
+    $('#res-ratings').hidden = name !== 'ratings';
+  }
+  document.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
 
   // ---------- setup ----------
   function buildAgents() {
@@ -1011,14 +1123,13 @@
         label.textContent = entry.player.short;
         el.append(label);
         wrap.append(el);
-        const pac = entry.player.pac ?? 75;
-        const sprint = 6.6 + ((pac - 50) / 50) * 3; // 50 pace -> 6.6 m/s, 97 pace -> ~9.4 m/s
         const o = {
           key: key(side, i), el, side, i, slot: entry.slot, role: entry.slot.role,
           p: { x: 0, y: 0 }, v: { x: 0, y: 0 }, offs: { dx: 0, dy: 0 }, nextOff: rand(0.5, 3),
           goal: { x: 0, y: 0 }, max: 5, acc: 8, ov: null, run: null, spot: null, stride: rand(0, 6),
-          sprint, jog: sprint * 0.62, off: false, gone: false,
+          off: false, gone: false, since: 0, hasBall: false,
         };
+        setPace(o, entry.player);
         agents[o.key] = o;
       });
     });
@@ -1026,12 +1137,25 @@
     Object.values(agents).forEach((o) => { o.p = shapeTarget(o); o.goal = { ...o.p }; });
   }
 
+  let original = null;
   function start(home, away) {
-    teams = { home, away };
+    original = { home, away };
+    // private copies: substitutions rewrite lineup entries during playback
+    const copy = (t) => ({ ...t, lineup: t.lineup.map((e) => ({ ...e })) });
+    teams = { home: copy(home), away: copy(away) };
     runId++;
     skipping = false;
     timers = [];
-    result = Sim.simulate(home.lineup, away.lineup, (Math.random() * 2 ** 32) >>> 0, { home: home.tactic, away: away.tactic });
+    const stamina = Options.get('stamina');
+    result = Sim.simulate(home.lineup, away.lineup, (Math.random() * 2 ** 32) >>> 0,
+      { home: home.tactic, away: away.tactic },
+      { stamina, bench: { home: home.bench || [], away: away.bench || [] } });
+    live.stamina = stamina;
+    live.minute = 0;
+    Sound.setEnabled(Options.get('sound'));
+    syncMute();
+    Sound.crowdStart();
+    $('#added').hidden = true;
     Object.assign(live, {
       score: { home: 0, away: 0 }, possession: 'home', celebrate: null, kickoff: true, setPiece: null, lastOut: null,
       cards: { home: { yellow: 0, red: 0 }, away: { yellow: 0, red: 0 } },
@@ -1073,6 +1197,7 @@
 
   function leave() {
     stop();
+    Sound.crowdStop();
     document.body.classList.remove('is-playing');
     $('#match').hidden = true;
     $('#draft').hidden = false;
@@ -1092,7 +1217,24 @@
     timers = [];
     if (ball.fl) finishFlight();
   });
-  $('#rematch').addEventListener('click', () => start(teams.home, teams.away));
+  $('#rematch').addEventListener('click', () => { Sound.unlock(); start(original.home, original.away); });
+
+  function syncMute() {
+    const on = Sound.isEnabled();
+    const b = $('#mute');
+    b.textContent = on ? '🔊' : '🔇';
+    b.setAttribute('aria-pressed', String(!on));
+    b.setAttribute('aria-label', on ? '사운드 끄기' : '사운드 켜기');
+  }
+  $('#mute').addEventListener('click', () => {
+    const on = !Sound.isEnabled();
+    Options.set('sound', on);
+    Sound.setEnabled(on);
+    if (on && $('#result').hidden) Sound.crowdStart();
+    syncMute();
+  });
+  // the pitch can change size (rotation, split view): keep the meter -> px scale right
+  if (window.ResizeObserver) new ResizeObserver(() => { pxPerM = ($('#pitch').clientWidth || 1155) / W; draw(); }).observe($('#pitch'));
   $('#back').addEventListener('click', leave);
   $('#exit').addEventListener('click', leave);
 

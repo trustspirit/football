@@ -15,9 +15,10 @@
   };
   const SAVE_KEY = 'mdc-squads-v1';
   const SAVE_SLOTS = 6;
+  const BENCH = 5;
 
   const newTeam = (name, formation) => ({
-    name, formation, slots: Array(11).fill(null), tactic: { ...Sim.TACTIC_DEFAULT },
+    name, formation, slots: Array(11).fill(null), bench: Array(BENCH).fill(null), tactic: { ...Sim.TACTIC_DEFAULT },
   });
 
   const state = {
@@ -31,7 +32,8 @@
   const otherSide = () => (state.step === 'home' ? 'away' : 'home');
   const isFull = (side) => state.teams[side].slots.every(Boolean);
   // A player can appear in both teams, but only once within a team.
-  const inTeam = (side, id) => state.teams[side].slots.includes(id);
+  const useBench = () => Options.get('stamina');
+  const inTeam = (side, id) => state.teams[side].slots.includes(id) || (useBench() && state.teams[side].bench.includes(id));
 
   // ---------- search ----------
   const norm = (v) => v.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[\s.\-']/g, '').toLowerCase();
@@ -39,23 +41,36 @@
   const matches = (p) => !state.query || p._search.includes(norm(state.query));
 
   // ---------- squad mutations ----------
-  function placeAt(idx, id) {
+  // Put `id` at a pitch slot or bench spot. If the player was already in the team,
+  // the two positions swap (pitch <-> pitch, pitch <-> bench, bench <-> bench).
+  function moveTo(target, id) {
     const team = current();
-    const prev = team.slots.indexOf(id);
-    if (prev >= 0) team.slots[prev] = team.slots[idx]; // moving within the team -> swap
-    team.slots[idx] = id;
+    const arr = (kind) => (kind === 'bench' ? team.bench : team.slots);
+    let from = null;
+    if (team.slots.includes(id)) from = { kind: 'pitch', i: team.slots.indexOf(id) };
+    else if (team.bench.includes(id)) from = { kind: 'bench', i: team.bench.indexOf(id) };
+    const displaced = arr(target.kind)[target.i];
+    arr(target.kind)[target.i] = id;
+    if (from && !(from.kind === target.kind && from.i === target.i)) arr(from.kind)[from.i] = displaced;
   }
+  const placeAt = (idx, id) => moveTo({ kind: 'pitch', i: idx }, id);
 
   function pickCard(id) {
     const team = current();
     if (inTeam(state.step, id) && state.targetSlot === null) {
-      team.slots[team.slots.indexOf(id)] = null;
+      if (team.slots.includes(id)) team.slots[team.slots.indexOf(id)] = null;
+      else team.bench[team.bench.indexOf(id)] = null;
       return render();
     }
     const layout = FORMATIONS[team.formation];
     let idx = state.targetSlot;
     if (idx === null) idx = layout.findIndex((s, i) => s.role === PLAYER_BY_ID[id].pos && !team.slots[i]);
     if (idx === -1) idx = team.slots.findIndex((x) => !x);
+    if (idx === -1 && useBench()) {
+      const b = team.bench.findIndex((x) => !x);
+      if (b >= 0) { moveTo({ kind: 'bench', i: b }, id); return render(); }
+      return flashTip('선발 11명과 벤치 5명이 모두 찼어요. 선수를 눌러 빼고 다시 골라 주세요.');
+    }
     if (idx === -1) return flashTip('11명이 모두 찼어요. 피치 위 선수를 눌러 빼거나, 카드를 원하는 자리로 끌어다 놓으세요.');
     placeAt(idx, id);
     state.targetSlot = null;
@@ -90,6 +105,17 @@
       team.slots[i] = pick.id;
       used.add(pick.id);
     });
+    if (useBench()) {
+      // a balanced bench: GK, DEF, MID, and two attackers
+      ['GK', 'DEF', 'MID', 'FWD', 'FWD'].forEach((role, i) => {
+        if (team.bench[i]) { used.add(team.bench[i]); return; }
+        const options = PLAYERS.filter((p) => p.pos === role && !used.has(p.id));
+        if (!options.length) return;
+        const pick = options[Math.floor(Math.random() * options.length)];
+        team.bench[i] = pick.id;
+        used.add(pick.id);
+      });
+    }
     render();
   }
 
@@ -107,11 +133,17 @@
     const slots = Array.from({ length: 11 }, (_, i) => (PLAYER_BY_ID[s.slots[i]] ? s.slots[i] : null));
     const seen = new Set();
     slots.forEach((id, i) => { if (id && seen.has(id)) slots[i] = null; else if (id) seen.add(id); });
+    const bench = Array.from({ length: BENCH }, (_, i) => {
+      const id = Array.isArray(s.bench) ? s.bench[i] : null;
+      if (!PLAYER_BY_ID[id] || seen.has(id)) return null;
+      seen.add(id);
+      return id;
+    });
     const tactic = { ...Sim.TACTIC_DEFAULT };
     Object.keys(TACTIC_OPTIONS).forEach((k) => {
       if (s.tactic && TACTIC_OPTIONS[k].options[s.tactic[k]]) tactic[k] = s.tactic[k];
     });
-    return { name: String(s.name || 'Team').slice(0, 18), formation: s.formation, slots, tactic, savedAt: +s.savedAt || Date.now() };
+    return { name: String(s.name || 'Team').slice(0, 18), formation: s.formation, slots, bench, tactic, savedAt: +s.savedAt || Date.now() };
   }
   function readSaves() {
     try {
@@ -127,7 +159,7 @@
   function saveTo(n) {
     const t = current();
     const arr = readSaves();
-    arr[n] = { name: t.name, formation: t.formation, slots: [...t.slots], tactic: { ...t.tactic }, savedAt: Date.now() };
+    arr[n] = { name: t.name, formation: t.formation, slots: [...t.slots], bench: [...t.bench], tactic: { ...t.tactic }, savedAt: Date.now() };
     if (!writeSaves(arr)) return flashTip('저장 공간을 사용할 수 없어요 (사생활 보호 모드 등).');
     renderSaves();
     flashTip(`${n + 1}번 슬롯에 "${t.name}" 저장 완료`);
@@ -139,6 +171,7 @@
     t.name = s.name;
     t.formation = s.formation;
     t.slots = [...s.slots];
+    t.bench = [...s.bench];
     t.tactic = { ...s.tactic };
     state.targetSlot = null;
     closeSaves();
@@ -245,7 +278,18 @@
       </div>
       <div class="team__tactics">${tacticsHTML(team)}</div>
       <div class="mini-pitch">${slots}</div>
+      ${useBench() ? benchHTML(team) : ''}
       <div class="team__nav">${nav}</div>`;
+  }
+
+  function benchHTML(team) {
+    const cells = team.bench.map((id, i) => {
+      if (!id) return `<button class="bench-slot bench-slot--empty" data-bench="${i}" title="벤치 자리 — 카드를 끌어다 놓으세요">+</button>`;
+      const p = PLAYER_BY_ID[id];
+      return `<button class="bench-slot" data-bench="${i}" data-drag="bench" title="${esc(p.ko)} (${p.pos}) — 탭해서 빼기 / 끌어서 선발과 바꾸기">
+        ${Photos.html(p)}<em>${p.short}</em><i>${p.pos}</i></button>`;
+    }).join('');
+    return `<div class="bench"><span class="bench__label">벤치 <small>${team.bench.filter(Boolean).length}/${BENCH}</small></span><div class="bench__row">${cells}</div></div>`;
   }
 
   function cardHTML(p) {
@@ -328,8 +372,10 @@
         name: t.name,
         tactic: { ...t.tactic },
         lineup: FORMATIONS[t.formation].map((slot, i) => ({ player: PLAYER_BY_ID[t.slots[i]], slot })),
+        bench: useBench() ? t.bench.filter(Boolean).map((id) => PLAYER_BY_ID[id]) : [],
       };
     };
+    Sound.unlock(); // must happen inside the tap for iOS
     Match.start(lineup('home'), lineup('away'));
   }
 
@@ -349,6 +395,12 @@
   }, true);
 
   teamEl.addEventListener('click', (e) => {
+    const benchBtn = e.target.closest('.bench-slot');
+    if (benchBtn) {
+      const i = +benchBtn.dataset.bench;
+      if (current().bench[i]) { current().bench[i] = null; return render(); }
+      return flashTip('벤치 자리예요 — 선발이 다 찬 뒤 카드를 탭하거나, 카드를 이 자리로 끌어다 놓으세요.');
+    }
     const slotBtn = e.target.closest('.slot');
     const act = e.target.closest('[data-act]');
     if (slotBtn) {
@@ -361,7 +413,7 @@
     if (!act) return;
     switch (act.dataset.act) {
       case 'auto': return autoFill();
-      case 'clear': current().slots = Array(11).fill(null); state.targetSlot = null; return render();
+      case 'clear': current().slots = Array(11).fill(null); current().bench = Array(BENCH).fill(null); state.targetSlot = null; return render();
       case 'next': return goTo('away');
       case 'prev': return goTo('home');
       case 'kickoff': return kickoff();
@@ -400,9 +452,10 @@
   // Touch drags on cards start only after a short hold so the column can still scroll.
   const drag = { src: null, ghost: null, startX: 0, startY: 0, active: false, timer: null, pointerId: null, suppressClick: false };
 
+  const srcId = (src) => (src.kind === 'card' ? src.id : src.kind === 'bench' ? current().bench[src.slot] : current().slots[src.slot]);
   function slotAt(x, y) {
     const el = document.elementFromPoint(x, y);
-    return el && el.closest('#team .slot');
+    return el && el.closest('#team .slot, #team .bench-slot');
   }
   function beginDrag(e) {
     if (drag.ghost) drag.ghost.remove();
@@ -410,7 +463,7 @@
     const src = drag.src;
     const ghost = document.createElement('div');
     ghost.className = 'drag-ghost';
-    const id = src.kind === 'card' ? src.id : current().slots[src.slot];
+    const id = srcId(src);
     const p = PLAYER_BY_ID[id];
     ghost.innerHTML = Photos.html(p);
     const label = document.createElement('em');
@@ -441,13 +494,9 @@
   function endDrag(x, y) {
     const over = drag.active ? slotAt(x, y) : null;
     if (over) {
-      const idx = +over.dataset.slot;
-      const team = current();
-      if (drag.src.kind === 'card') placeAt(idx, drag.src.id);
-      else if (drag.src.slot !== idx) {
-        const from = drag.src.slot;
-        [team.slots[from], team.slots[idx]] = [team.slots[idx], team.slots[from]];
-      }
+      const target = over.dataset.bench !== undefined ? { kind: 'bench', i: +over.dataset.bench } : { kind: 'pitch', i: +over.dataset.slot };
+      const id = srcId(drag.src);
+      if (id) moveTo(target, id);
       state.targetSlot = null;
     }
     if (drag.active) {
@@ -470,8 +519,11 @@
     if (e.button !== 0 || $('#draft').hidden) return;
     const card = e.target.closest('[data-drag="card"]');
     const slot = e.target.closest('[data-drag="slot"]');
-    if (!card && !slot) return;
-    drag.src = card ? { kind: 'card', id: card.dataset.id } : { kind: 'slot', slot: +slot.dataset.slot };
+    const benched = e.target.closest('[data-drag="bench"]');
+    if (!card && !slot && !benched) return;
+    drag.src = card ? { kind: 'card', id: card.dataset.id }
+      : slot ? { kind: 'slot', slot: +slot.dataset.slot }
+        : { kind: 'bench', slot: +benched.dataset.bench };
     drag.startX = e.clientX;
     drag.startY = e.clientY;
     drag.pointerId = e.pointerId;
@@ -530,6 +582,25 @@
       search.focus();
     }
   });
+
+  // ---------- settings ----------
+  const settings = $('#settings');
+  function openSettings() {
+    settings.querySelectorAll('[data-opt]').forEach((c) => { c.checked = !!Options.get(c.dataset.opt); });
+    settings.hidden = false;
+  }
+  $('#open-settings').addEventListener('click', openSettings);
+  settings.addEventListener('click', (e) => {
+    if (e.target === settings || e.target.closest('[data-close]')) settings.hidden = true;
+  });
+  settings.addEventListener('change', (e) => {
+    const c = e.target.closest('[data-opt]');
+    if (!c) return;
+    Options.set(c.dataset.opt, c.checked);
+    if (c.dataset.opt === 'sound') Sound.setEnabled(c.checked);
+    render();
+  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !settings.hidden) settings.hidden = true; });
 
   Match.onBack(() => render());
 

@@ -50,15 +50,96 @@
     high: { ownHalf: -0.06, foul: 1.35, fwdLine: 6 },
   };
 
+  // Tiredness (only with the stamina option): 100 energy = full strength, 0 = 75 %.
+  const fatigue = (entry) => (entry.energy == null ? 1 : 0.75 + 0.25 * (entry.energy / 100));
+
   // A player out of their natural role loses effectiveness (technical stats only).
   function eff(entry, stat) {
     const { player, slot } = entry;
-    const v = player[stat] ?? 70;
+    const v = (player[stat] ?? 70) * fatigue(entry);
     if (stat === 'pac' || stat === 'phy' || stat === 'fk') return v;
     if (player.pos === slot.role) return v;
     if (player.pos === 'GK' || slot.role === 'GK') return v * 0.5;
     return v * 0.88;
   }
+
+  // ---------- player ratings (6.0 base, like a newspaper match report) ----------
+  // Walks the event list, tracking who is in each lineup index (substitutions change it),
+  // and tags goal / card events with player ids so names stay right after subs.
+  function rateMatch(events, startIds, score) {
+    const ids = { home: [...startIds.home], away: [...startIds.away] };
+    const R = {};
+    const touch = (side, i) => {
+      const id = ids[side][i];
+      if (!R[id]) R[id] = { id, side, r: 6.0, goals: 0, assists: 0, saves: 0, cards: '', subIn: null, subOut: null };
+      return R[id];
+    };
+    ['home', 'away'].forEach((s) => ids[s].forEach((_, i) => touch(s, i)));
+    const opp = (s) => (s === 'home' ? 'away' : 'home');
+    const gkIndex = { home: startIds.gk.home, away: startIds.gk.away };
+    const SHOTS = new Set(['goal', 'save', 'miss']);
+    events.forEach((e, n) => {
+      switch (e.type) {
+        case 'pass': {
+          const passer = touch(e.side, e.from);
+          passer.r += e.kind === 'through' || e.kind === 'cross' ? 0.08 : 0.03;
+          // key pass: the receiver shoots next
+          const nx = events[n + 1];
+          if (nx && SHOTS.has(nx.type) && nx.side === e.side && nx.from === e.to) passer.r += 0.2;
+          break;
+        }
+        case 'intercept':
+          touch(opp(e.side), e.by).r += 0.12;
+          touch(e.side, e.from).r -= 0.03;
+          break;
+        case 'goal': {
+          e.pid = ids[e.side][e.from];
+          const g = touch(e.side, e.from); g.r += 1.0; g.goals++;
+          if (e.assist != null) { e.apid = ids[e.side][e.assist]; const a = touch(e.side, e.assist); a.r += 0.55; a.assists++; }
+          touch(opp(e.side), gkIndex[opp(e.side)]).r -= 0.3;
+          break;
+        }
+        case 'save': {
+          const k = touch(opp(e.side), e.keeper); k.r += 0.2; k.saves++;
+          touch(e.side, e.from).r += 0.05;
+          break;
+        }
+        case 'miss': touch(e.side, e.from).r -= 0.05; break;
+        case 'foul': {
+          e.pid = ids[e.side][e.by];
+          const f = touch(e.side, e.by);
+          f.r -= 0.05;
+          touch(e.victimSide, e.on).r += 0.05;
+          if (e.card === 'yellow') { f.r -= 0.3; f.cards += 'Y'; }
+          if (e.card === 'second-yellow') { f.r -= 1.2; f.cards += 'YR'; }
+          if (e.card === 'red') { f.r -= 1.5; f.cards += 'R'; }
+          break;
+        }
+        case 'sub': {
+          touch(e.side, e.i).subOut = e.minute;
+          ids[e.side][e.i] = e.in;
+          touch(e.side, e.i).subIn = e.minute;
+          break;
+        }
+        default: break;
+      }
+    });
+    // team result and clean sheets
+    Object.values(R).forEach((p) => {
+      const gf = score[p.side];
+      const ga = score[opp(p.side)];
+      // the result counts in proportion to minutes played (a late sub barely shares it)
+      const played = Math.max(0, (p.subOut ?? 90) - (p.subIn ?? 0)) / 90;
+      p.r += (gf > ga ? 0.3 : gf < ga ? -0.25 : 0) * played;
+      const pl = PLAYER_LOOKUP(p.id);
+      if (ga === 0 && pl && (pl.pos === 'GK' || pl.pos === 'DEF')) p.r += (pl.pos === 'GK' ? 0.4 : 0.3) * played;
+      p.r = Math.round(clamp(p.r, 3, 10) * 10) / 10;
+    });
+    const list = Object.values(R);
+    const mom = list.slice().sort((a, b) => b.r - a.r || (score[b.side] - score[opp(b.side)]) - (score[a.side] - score[opp(a.side)]))[0];
+    return { players: list, mom: mom && mom.id };
+  }
+  const PLAYER_LOOKUP = (id) => (root.PLAYER_BY_ID ? root.PLAYER_BY_ID[id] : null);
 
   function pickWeighted(rng, items, weight) {
     const ws = items.map(weight);
@@ -77,11 +158,25 @@
     };
   }
 
-  function simulate(home, away, seed, tactics) {
+  // opts: { stamina: bool, bench: { home: [player], away: [player] } }
+  function simulate(home, away, seed, tactics, opts = {}) {
     const rng = mulberry32(seed >>> 0);
+    const stamina = !!opts.stamina;
+    // Entries are copied: energy and substitutions must not leak into the caller's lineup.
+    const prep = (lineup) => lineup.map((e) => ({ ...e, energy: stamina ? 100 : null }));
     const T = {
-      home: { lineup: home, tac: { ...TACTIC_DEFAULT, ...(tactics && tactics.home) }, off: new Set(), booked: new Set() },
-      away: { lineup: away, tac: { ...TACTIC_DEFAULT, ...(tactics && tactics.away) }, off: new Set(), booked: new Set() },
+      home: { lineup: prep(home), tac: { ...TACTIC_DEFAULT, ...(tactics && tactics.home) }, off: new Set(), booked: new Set(),
+        bench: stamina ? [...((opts.bench && opts.bench.home) || [])].filter(Boolean) : [], subs: 0 },
+      away: { lineup: prep(away), tac: { ...TACTIC_DEFAULT, ...(tactics && tactics.away) }, off: new Set(), booked: new Set(),
+        bench: stamina ? [...((opts.bench && opts.bench.away) || [])].filter(Boolean) : [], subs: 0 },
+    };
+    const startIds = {
+      home: T.home.lineup.map((e) => e.player.id),
+      away: T.away.lineup.map((e) => e.player.id),
+      gk: {
+        home: Math.max(0, T.home.lineup.findIndex((e) => e.slot.role === 'GK')),
+        away: Math.max(0, T.away.lineup.findIndex((e) => e.slot.role === 'GK')),
+      },
     };
     const stats = { home: newStats(), away: newStats() };
     const score = { home: 0, away: 0 };
@@ -327,9 +422,49 @@
       // otherwise: taken short, play continues from the taker
     }
 
-    restart('home', kickoffTaker('home'), 'kickoff');
+    // ---------- stamina & substitutions (option) ----------
+    let lastMin = 0;
+    const tire = () => {
+      const dt = minute - lastMin;
+      lastMin = minute;
+      if (!stamina || dt <= 0) return;
+      ['home', 'away'].forEach((s) => {
+        const pressMul = T[s].tac.press === 'high' ? 1.2 : T[s].tac.press === 'low' ? 0.85 : 1;
+        active(s).forEach(({ e }) => {
+          const rate = e.slot.role === 'GK' ? 0.12 : Math.max(0.2, 0.56 - (e.player.phy - 70) / 300);
+          e.energy = Math.max(0, e.energy - dt * rate * pressMul);
+        });
+      });
+    };
+    // From the hour mark, a tired outfield player (not on the ball) may be replaced,
+    // preferably by a bench player of the same position. Max 5 substitutions.
+    const trySubs = () => {
+      if (!stamina || minute < 58) return;
+      ['home', 'away'].forEach((s) => {
+        const t = T[s];
+        if (!t.bench.length || t.subs >= 5) return;
+        const tired = active(s)
+          .filter((o) => o.e.slot.role !== 'GK' && o.e.energy < 78 && !(s === side && o.i === holder))
+          .sort((a, b) => a.e.energy - b.e.energy)[0];
+        if (!tired || rng() > 0.06) return;
+        let bi = t.bench.findIndex((p) => p.pos === tired.e.slot.role);
+        if (bi < 0) bi = t.bench.findIndex((p) => p.pos !== 'GK');
+        if (bi < 0) return;
+        const inP = t.bench.splice(bi, 1)[0];
+        const outP = tired.e.player;
+        t.lineup[tired.i] = { player: inP, slot: tired.e.slot, energy: 100 };
+        t.booked.delete(tired.i); // the booking leaves with the player
+        t.subs++;
+        events.push({ type: 'sub', side: s, i: tired.i, out: outP.id, in: inP.id, minute: Math.floor(minute) });
+      });
+    };
 
-    while (minute < 90) {
+    restart('home', kickoffTaker('home'), 'kickoff');
+    let added1 = null;
+    let added2 = null;
+
+    for (;;) {
+      tire();
       // a free kick / penalty / corner already awarded is always taken, even on the whistle
       if (setPiece) {
         const sp = setPiece;
@@ -337,11 +472,28 @@
         playSetPiece(sp);
         continue;
       }
-      if (!secondHalf && minute >= 45) {
-        secondHalf = true;
-        minute = 45;
-        events.push({ type: 'half', minute: 45 });
-        restart('away', kickoffTaker('away'), 'kickoff');
+      if (!secondHalf) {
+        // stoppage time is announced at 45' and played before the break
+        if (added1 === null && minute >= 45) {
+          added1 = 1 + Math.floor(rng() * 3);
+          events.push({ type: 'added', minute: 45, extra: added1 });
+        }
+        if (added1 !== null && minute >= 45 + added1) {
+          secondHalf = true;
+          minute = 45;
+          lastMin = 45;
+          events.push({ type: 'half', minute: 45 });
+          if (stamina) ['home', 'away'].forEach((s) => T[s].lineup.forEach((e) => { e.energy = Math.min(100, e.energy + 10); }));
+          restart('away', kickoffTaker('away'), 'kickoff');
+        }
+      } else {
+        if (added2 === null && minute >= 90) {
+          const busy = stats.home.reds + stats.away.reds + Math.floor((T.home.subs + T.away.subs) / 3) + Math.floor((score.home + score.away) / 3);
+          added2 = Math.min(7, 2 + Math.floor(rng() * 3) + busy);
+          events.push({ type: 'added', minute: 90, extra: added2 });
+        }
+        if (added2 !== null && minute >= 90 + added2) break;
+        trySubs();
       }
 
       const oppSide = other(side);
@@ -439,8 +591,23 @@
     }
 
     if (setPiece) { const sp = setPiece; setPiece = null; playSetPiece(sp); }
-    events.push({ type: 'end', minute: 90, score: { ...score } });
-    return { events, score, stats, seed, sentOff: { home: [...T.home.off], away: [...T.away.off] } };
+    events.push({ type: 'end', minute: Math.floor(minute), score: { ...score } });
+
+    // Minutes in stoppage time are shown as 45+2 / 90+3: split them into minute + plus.
+    let half2 = false;
+    events.forEach((e) => {
+      if (e.type === 'half') { half2 = true; return; }
+      if (e.minute === undefined) return;
+      const base = half2 ? 90 : 45;
+      if (e.minute > base) { e.plus = e.minute - base; e.minute = base; }
+    });
+
+    const ratings = rateMatch(events, startIds, score);
+    return {
+      events, score, stats, seed, ratings,
+      subs: { home: T.home.subs, away: T.away.subs },
+      sentOff: { home: [...T.home.off], away: [...T.away.off] },
+    };
   }
 
   const api = { simulate, eff, TACTIC_DEFAULT };
