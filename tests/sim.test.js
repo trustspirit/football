@@ -182,3 +182,117 @@ test('dribbles: good dribblers take players on more often, failures lose the bal
   }
   assert.ok(byStars > byDefs * 2, `stars ${byStars} vs defenders ${byDefs}`);
 });
+
+const OPEN_SHOTS = new Set(['shot', 'long']);
+const isShot = (e) => ['goal', 'save', 'miss'].includes(e.type);
+
+test('every player has a shooting skill in range', () => {
+  global.PLAYERS.forEach((p) => assert.ok(p.sho >= 20 && p.sho <= 99, `${p.id}.sho=${p.sho}`));
+});
+
+test('open-play shots come from the attacking half, never from deep', () => {
+  let n = 0;
+  for (let s = 1; s <= 150; s++) {
+    simulate(strong, weaker, s).events.filter((e) => isShot(e) && OPEN_SHOTS.has(e.kind)).forEach((e) => {
+      n++;
+      assert.ok(e.x >= 50, `seed ${s}: ${e.kind} shot from x=${e.x}`);
+    });
+  }
+  assert.ok(n > 1000);
+});
+
+test('attacks keep moving forward: few passes go back from the final third', () => {
+  let fromAtt = 0; let back = 0; let backDeep = 0;
+  for (let s = 1; s <= 150; s++) {
+    simulate(strong, weaker, s).events.forEach((e) => {
+      if (e.type !== 'pass' || e.kind === 'throw') return;
+      const L = e.side === 'home' ? strong : weaker;
+      const fx = L[e.from].slot.x; const tx = L[e.to].slot.x;
+      if (fx < 55) return;
+      fromAtt++;
+      if (tx < fx - 5) back++;
+      if (tx < 30) backDeep++;
+    });
+  }
+  assert.ok(back / fromAtt < 0.4, `backward ${(100 * back / fromAtt).toFixed(1)}%`);
+  assert.ok(backDeep / fromAtt < 0.06, `back to the defence ${(100 * backDeep / fromAtt).toFixed(1)}%`);
+});
+
+test('shooting skill matters: a better finisher scores more from the same slot', () => {
+  const withStriker = (sho) => strong.map((e, i) => (i === 9 ? { ...e, player: { ...e.player, sho } } : e));
+  const goalsBy = (lu) => {
+    let g = 0;
+    for (let s = 1; s <= 300; s++) g += simulate(lu, weaker, s).events.filter((e) => e.type === 'goal' && e.side === 'home' && e.from === 9).length;
+    return g;
+  };
+  const good = goalsBy(withStriker(95));
+  const poor = goalsBy(withStriker(55));
+  assert.ok(good > poor * 1.4, `sho 95: ${good} goals vs sho 55: ${poor}`);
+});
+
+test('in on goal after a through ball: shoot or take the man on, rarely pass back', () => {
+  let n = 0; let decisive = 0; let longBack = 0; let fwdPasses = 0;
+  for (let s = 1; s <= 150; s++) {
+    const ev = simulate(strong, weaker, s).events;
+    ev.forEach((e, i) => {
+      const L = e.side === 'home' ? strong : weaker;
+      if (e.type === 'pass' && e.kind !== 'throw' && L[e.from].slot.x >= 70) {
+        fwdPasses++;
+        if (L[e.from].slot.x - L[e.to].slot.x > 30) longBack++;
+      }
+      if (e.type !== 'pass' || e.kind !== 'through' || L[e.to].slot.x < 60) return;
+      const nx = ev[i + 1];
+      if (!nx || nx.type === 'foul' || nx.type === 'added' || nx.type === 'half' || nx.type === 'end') return;
+      n++;
+      if (isShot(nx) || nx.type === 'dribble') decisive++;
+    });
+  }
+  assert.ok(decisive / n > 0.6, `shot/dribble after a through ball ${(100 * decisive / n).toFixed(1)}%`);
+  assert.ok(longBack / fwdPasses < 0.03, `long back passes from forwards ${(100 * longBack / fwdPasses).toFixed(1)}%`);
+});
+
+test('wing play: wingers run down the line, then cross or cut back into the box', () => {
+  let runs = 0; let thenDelivery = 0; let crossGoals = 0; let headers = 0; let cutbacks = 0;
+  const N = 150;
+  for (let s = 1; s <= N; s++) {
+    const ev = simulate(strong, weaker, s).events;
+    ev.forEach((e, i) => {
+      if (e.type === 'dribble' && e.ok && e.wing) {
+        const nx = ev.slice(i + 1).find((x) => x.type !== 'foul' && x.type !== 'freekick');
+        runs++;
+        if (nx && (nx.type === 'pass' || nx.type === 'intercept') && (nx.kind === 'cross' || nx.kind === 'cutback')) thenDelivery++;
+      }
+      if ((e.type === 'pass' || e.type === 'intercept') && e.kind === 'cutback') cutbacks++;
+      if (e.type === 'goal' && e.kind === 'header') headers++;
+      const pv = ev[i - 1];
+      if (e.type === 'goal' && pv && pv.type === 'pass' && (pv.kind === 'cross' || pv.kind === 'cutback')) crossGoals++;
+    });
+  }
+  assert.ok(runs / N >= 2, `wing runs per match ${runs / N}`);
+  assert.ok(thenDelivery / runs > 0.5, `delivery after a wing run ${(100 * thenDelivery / runs).toFixed(1)}%`);
+  assert.ok(cutbacks / N >= 0.6, `cut-back attempts per match ${cutbacks / N}`);
+  assert.ok(crossGoals / N >= 0.3, `goals from crosses / cut-backs per match ${crossGoals / N}`);
+  assert.ok(headers / N >= 0.15, `headed goals per match ${headers / N}`);
+});
+
+test('free-kick skill decides direct free kicks, shooting skill decides open-play shots', () => {
+  // the best free-kick taker on the pitch takes them: compare a specialist with a poor taker
+  const withTaker = (fk) => strong.map((e, i) => (i === 7 ? { ...e, player: { ...e.player, fk } } : e));
+  const fkGoals = (lu) => {
+    let g = 0;
+    for (let s = 1; s <= 600; s++) g += simulate(lu, weaker, s).events.filter((e) => e.type === 'goal' && e.side === 'home' && e.kind === 'freekick').length;
+    return g;
+  };
+  const specialist = fkGoals(withTaker(99));
+  const poor = fkGoals(withTaker(60).map((e) => ({ ...e, player: { ...e.player, fk: Math.min(e.player.fk, 60) } })));
+  assert.ok(specialist > poor * 1.5, `fk 99: ${specialist} free-kick goals vs all takers <= 60: ${poor}`);
+});
+
+test('nobody shoots straight from the kick-off', () => {
+  for (let s = 1; s <= 300; s++) {
+    const ev = simulate(strong, weaker, s).events;
+    ev.forEach((e, i) => {
+      if (e.type === 'kickoff') assert.ok(!isShot(ev[i + 1] || {}), `seed ${s}: shot right after kick-off at ${e.minute}'`);
+    });
+  }
+});

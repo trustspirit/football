@@ -1,5 +1,5 @@
 // Player pool. Ratings are rough, illustrative numbers — not official data.
-// att = finishing/dribbling, pas = passing/vision, def = defending (GK: shot-stopping)
+// att = finishing/dribbling, pas = passing/vision, def = defending (GK: shot-stopping), sho = shooting
 (function () {
   const raw = [
     // FWD
@@ -417,7 +417,7 @@
     suzuki: ['스즈키 자이온', '스즈키'],
   };
 
-  // Extra skills: [pace, physical (aerial/strength), kicking (set pieces / long-range power)].
+  // Extra skills: [pace, physical (aerial/strength), free kicks (set pieces / dead-ball delivery / shot power)].
   const SKILLS = {
     mbappe: [97, 77, 80], haaland: [89, 92, 62], vinicius: [95, 68, 70], kane: [70, 83, 85],
     salah: [89, 75, 75], yamal: [86, 60, 82], lautaro: [82, 83, 70], messi: [78, 65, 94],
@@ -534,6 +534,18 @@
     kane: 80, haaland: 78,
     garnacho: 85, doku: 90, kudus: 87, coman: 87, mahrez: 87, grealish: 87, baejunho: 82, yangminhyeok: 82, gavi: 85, balde: 82,
   };
+  // Shooting (finishing + shot power/placement) for known goal threats; others are derived from attack / kicking.
+  const SHO = {
+    haaland: 94, kane: 94, ronaldo: 93, lewandowski: 92, mbappe: 91, messi: 91, benzema: 90, son: 90,
+    salah: 89, lautaro: 89, gyokeres: 89, suarez: 89, isak: 88, debruyne: 88, vlahovic: 88, guirassy: 88,
+    osimhen: 87, griezmann: 87, alvarez: 87, raphinha: 87, dybala: 87, palmer: 87, bruno: 87, retegui: 87,
+    jdavid: 87, dembele: 86, neymar: 86, foden: 86, szoboszlai: 86, valverde: 86, bellingham: 85, olise: 85,
+    mctominay: 85, calhanoglu: 85, sesko: 85, watkins: 85, mbeumo: 85, mahrez: 85, saka: 84, yamal: 84,
+    vinicius: 84, odegaard: 84, kvara: 84, thuram: 84, ekitike: 84, semenyo: 84, rashford: 84, havertz: 83,
+    pulisic: 83, leao: 82, leekangin: 80, hwangheechan: 80, ohhyeongyu: 80, choguesung: 80, nunez: 80,
+    taa: 74, theo: 74, dimarco: 74, hakimi: 72,
+  };
+  const shootingOf = (id, pos, att, fk) => SHO[id] || (pos === 'GK' ? 20 : Math.round(0.65 * att + 0.35 * fk) - (pos === 'DEF' ? 4 : 0));
   const dribbleOf = (id, pos, att, pas, pac) => DRI[id] || (pos === 'GK' ? 30 : Math.round(0.45 * pac + 0.35 * att + 0.2 * pas) - (pos === 'DEF' ? 6 : 0));
 
   // Photo overrides for players whose English Wikipedia article has no lead image:
@@ -552,8 +564,9 @@
     const [ko, short] = KO[id] || [name, name.split(' ').slice(-1)[0]];
     const [pac, phy, fk] = SKILLS[id] || SKILL_DEFAULT[pos];
     const dri = dribbleOf(id, pos, att, pas, pac);
+    const sho = shootingOf(id, pos, att, fk);
     return {
-      id, name, ko, short, wiki, pos, nat, att, pas, def, pac, phy, fk, dri,
+      id, name, ko, short, wiki, pos, nat, att, pas, def, pac, phy, fk, dri, sho,
       commons: COMMONS[id] || null,
       photo: PHOTO_URL[id] || null,
       ovr: Math.round(att * wa + pas * wp + def * wd),

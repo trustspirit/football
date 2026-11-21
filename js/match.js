@@ -22,6 +22,7 @@
 
   const PASS = {
     short: { air: false, arrive: 5 },
+    cutback: { air: false, arrive: 6 },
     through: { air: false, arrive: 7, lead: 9 },
     long: { air: true, peak: 0.11 },
     switch: { air: true, peak: 0.09 },
@@ -574,10 +575,15 @@
     else await runUp(agents[fromK], S);
     live.kickoff = false;
 
+    // crosses are swung into the six-yard / penalty-spot area, cut-backs pulled back to the spot
+    const flank = ev.kind === 'cross' || ev.kind === 'cutback';
     const { A } = setPiece
       ? { A: inPitch({ x: goalLineX(S) - dirOf(S) * rand(6, 11), y: 34 + rand(-7, 7) }) }
-      : meetingPoint(r, prof, S);
+      : ev.kind === 'cross' ? { A: inPitch({ x: goalLineX(S) - dirOf(S) * rand(5, 12), y: 34 + rand(-8, 8) }) }
+        : ev.kind === 'cutback' ? { A: inPitch({ x: goalLineX(S) - dirOf(S) * rand(10, 15), y: 34 + rand(-6, 6) }) }
+          : meetingPoint(r, prof, S);
     r.ov = { t: A, spd: 'sprint' };
+    if (flank && Math.random() < 0.6) log(mm(ev), `${playerOf(S, ev.from).short} ${ev.kind === 'cross' ? '크로스' : '컷백'} → ${playerOf(S, ev.to).short}`, S);
     const header = (ev.kind === 'cross' || setPiece) && ev.nextHeader;
     await kick(A, { ...prof, h1: header ? 1.9 : 0, then: { mode: header ? 'hover' : prof.air ? 'dead' : 'held', holder: toK } });
     if (setPiece) { live.setPiece = null; agents[fromK].ov = null; Object.values(agents).forEach((o) => { o.spot = null; }); }
@@ -646,6 +652,24 @@
     }
   }
 
+  // Engine depth (0..100, x >= 70 = in the box) -> distance up the pitch, as a fraction of W.
+  const shotDepth = (x) => (x >= 70 ? Math.min(0.95, 0.83 + (x - 70) * 0.006) : 0.55 + (x - 50) * 0.014);
+  // Carries the ball up to where the engine took the shot from, if the shooter is short of it.
+  async function toShotSpot(k, S, ev) {
+    if (ev.x == null || skipping) return;
+    const c = agents[k];
+    if (ball.holder !== k) holdBy(k);
+    const fx = shotDepth(ev.x) * W;
+    const want = inPitch({
+      x: S === 'home' ? fx : W - fx,
+      y: ev.x >= 70 ? clamp(c.p.y, H / 2 - 13, H / 2 + 13) : c.p.y,
+    }, 3);
+    if ((want.x - c.p.x) * dirOf(S) < 2) return;
+    c.ov = { t: want, spd: 'sprint' };
+    for (let t = 0; t < 1.8 && dist(c.p, want) > 2 && !skipping; t += 0.15) await simWait(0.15);
+    c.ov = null;
+  }
+
   async function doShot(ev, next) {
     const S = ev.side;
     const shK = key(S, ev.from);
@@ -669,6 +693,7 @@
         setTimeout(endJump, 700 / speed);
       }
     } else {
+      await toShotSpot(shK, S, ev);
       await carry(shK, S, ev.kind === 'long' ? rand(0.4, 0.8) : rand(0.2, 0.5), 3);
     }
 
@@ -906,7 +931,17 @@
     c.ov = { t: meet, spd: 'sprint' };
     d.ov = { t: lerpP(d.p, meet, 0.85), spd: 'sprint', acc: 16 };
     await simWait(0.65);
-    if (ev.ok) {
+    if (ev.ok && ev.wing) {
+      // knocks it past the full-back and races down the touchline
+      const line = c.p.y < H / 2 ? rand(3, 6) : H - rand(3, 6);
+      const past = inPitch({ x: c.p.x + dir * rand(13, 19), y: line }, 2);
+      c.ov = { t: past, spd: 'sprint', acc: 18 };
+      d.ov = { t: lerpP(d.p, past, 0.5), spd: 'sprint' };
+      if (Math.random() < 0.6) log(mm(ev), `${playerOf(S, ev.from).short} 측면 돌파 — ${playerOf(D, ev.by).short} 따돌림`, S);
+      await simWait(1.3);
+      d.ov = null;
+      c.ov = null;
+    } else if (ev.ok) {
       const swerve = (c.p.y < H / 2 ? 1 : -1) * rand(2.5, 4.5);
       const past = inPitch({ x: c.p.x + dir * rand(7, 11), y: c.p.y + swerve }, 3);
       c.ov = { t: past, spd: 'sprint', acc: 18 };

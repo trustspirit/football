@@ -2,7 +2,8 @@
 // A lineup is [{ player, slot: { role, x, y } }, ...] (11 entries).
 //
 // What shapes the result:
-//  - Player skills: att (finishing), pas, def, pac (pace), phy (aerial/strength), fk (kicking).
+//  - Player skills: sho (shooting), fk (free kicks / set-piece delivery), att, dri, pas, def,
+//    pac (pace), phy (aerial/strength).
 //  - Out-of-position penalty, sent-off players (10 vs 11), line strength by formation.
 //  - Tactics per team: mentality, style, press.
 //  - Set pieces: fouls -> free kicks / penalties (+ yellow/red cards), corners from
@@ -25,12 +26,12 @@
   const AERIAL = new Set(['long', 'switch', 'cross', 'punt', 'corner', 'fkcross']);
 
   const PASS_MOD = {
-    short: 0.03, through: -0.08, long: -0.1, switch: -0.06, cross: -0.12, punt: -0.2, corner: -0.05, fkcross: -0.05,
+    short: 0.03, cutback: 0.02, through: -0.08, long: -0.1, switch: -0.06, cross: -0.12, punt: -0.2, corner: -0.05, fkcross: -0.05,
   };
   const SHOT_MOD = {
     shot: { on: 0.06, goal: 0.06 },
     long: { on: -0.1, goal: -0.12 },
-    header: { on: -0.02, goal: 0.02 },
+    header: { on: 0.04, goal: 0.09 },
     freekick: { on: -0.12, goal: -0.1 },
   };
   const MENTALITY = {
@@ -196,6 +197,8 @@
     let counterLeft = 0;      // passes left in a counter-attack
     let space = 0;            // bonus after beating a high press
     let carry = { key: null, adv: 0, n: 0 }; // ground gained by the current ball carrier's dribbles
+    let chance = false;       // clear chance: in behind / beat the man in the box / arriving late
+    let wingRun = false;      // just went down the line on the flank: look to cross
 
     // ---------- helpers ----------
     const active = (s) => T[s].lineup.map((e, i) => ({ e, i })).filter((o) => !T[s].off.has(o.i));
@@ -250,19 +253,22 @@
 
     const restart = (s, idx, type) => {
       carry = { key: null, adv: 0, n: 0 };
-      side = s; holder = idx; lastPasser = null; fromCross = false; counterLeft = 0; space = 0;
+      side = s; holder = idx; lastPasser = null; fromCross = false; counterLeft = 0; space = 0; chance = false; wingRun = false;
+      // the kick-off is taken on the halfway line, not from the forward's usual spot
+      if (type === 'kickoff') carry = { key: s + idx, adv: 50 - T[s].lineup[idx].slot.x, n: 2 };
       events.push({ type, side, holder, minute: Math.floor(minute) });
     };
     const turnover = (newSide, idx) => {
       carry = { key: null, adv: 0, n: 0 };
-      side = newSide; holder = idx; lastPasser = null; fromCross = false; space = 0;
+      side = newSide; holder = idx; lastPasser = null; fromCross = false; space = 0; chance = false; wingRun = false;
       const tac = T[newSide].tac;
       const oppAttacking = T[other(newSide)].tac.mentality === 'attacking';
       counterLeft = tac.style === 'counter' ? 3 : oppAttacking ? 2 : 0;
     };
 
     // ---------- shots ----------
-    function shoot(kind, idx, edge = false) {
+    // x: depth the shot is taken from (team frame), recorded on the event.
+    function shoot(kind, idx, edge = false, x = null) {
       const team = T[side];
       const oppSide = other(side);
       const sh = team.lineup[idx];
@@ -271,11 +277,13 @@
       st.shots++;
       const gkIdx = gkOf(oppSide);
       const gk = eff(T[oppSide].lineup[gkIdx], 'def');
-      let a = eff(sh, 'att');
-      if (kind === 'long') a = 0.5 * a + 0.5 * sh.player.fk;
-      if (kind === 'header') a = 0.5 * a + 0.5 * sh.player.phy;
-      if (kind === 'freekick') a = 0.3 * a + 0.7 * sh.player.fk;
-      if (kind === 'penalty') a = 0.6 * a + 0.4 * sh.player.fk;
+      // shooting skill drives every kind of shot; power (fk) and heading (phy) mix in
+      const sho = eff(sh, 'sho');
+      let a = 0.75 * sho + 0.25 * eff(sh, 'att');
+      if (kind === 'long') a = 0.6 * sho + 0.4 * sh.player.fk;
+      if (kind === 'header') a = 0.4 * sho + 0.6 * sh.player.phy;
+      if (kind === 'freekick') a = 0.15 * sho + 0.85 * sh.player.fk; // free-kick specialists
+      if (kind === 'penalty') a = 0.6 * sho + 0.4 * sh.player.fk;
 
       let onTarget;
       let pGoal;
@@ -285,10 +293,11 @@
       } else {
         const mod = SHOT_MOD[kind];
         const range = edge ? 0.03 : 0;
-        onTarget = clamp(0.28 + (a - 70) / 90 + mod.on - range, 0.1, 0.65);
-        pGoal = clamp(0.24 + (a - gk) / 120 + mod.goal - range + menDown(oppSide) * 0.03, 0.04, 0.5);
+        onTarget = clamp(0.17 + (a - 70) / 90 + mod.on - range, 0.1, 0.6);
+        pGoal = clamp(0.2 + (a - gk) / 110 + mod.goal - range + menDown(oppSide) * 0.03, 0.04, 0.5);
       }
-      const base = { side, from: idx, kind, minute: Math.floor(minute), aimY: 38 + rng() * 24 };
+      const spot = x ?? (kind === 'penalty' ? 89 : kind === 'header' ? 90 : 70);
+      const base = { side, from: idx, kind, x: Math.round(spot), minute: Math.floor(minute), aimY: 38 + rng() * 24 };
 
       if (rng() >= onTarget) {
         const over = rng() < (kind === 'shot' || kind === 'penalty' ? 0.3 : 0.5);
@@ -425,7 +434,7 @@
       const taker = bestBy(side, (e) => e.player.fk, (e) => e.slot.role !== 'GK');
       events.push({ type: 'freekick', side, holder: taker, x: sp.x, y: sp.y, direct: sp.direct, minute: Math.floor(minute) });
       holder = taker;
-      if (sp.direct) shoot('freekick', taker);
+      if (sp.direct) shoot('freekick', taker, false, sp.x);
       else if (sp.x >= 55) deliver('fkcross', taker);
       // otherwise: taken short, play continues from the taker
     }
@@ -514,22 +523,67 @@
       const sty = STYLE[team.tac.style];
 
       // --- Shot decision -------------------------------------------------
+      // Only from the attacking half, more often the closer to goal, and good shooters
+      // pull the trigger more readily (poor ones look for a pass instead).
       let shotKind = null;
       let edge = false; // shot from the edge of the box (attacking midfielders)
-      if (fromCross) { if (rng() < 0.45) shotKind = 'header'; }
-      else if (depth >= 70) { if (rng() < 0.22 * men.shoot) shotKind = 'shot'; }
-      else if (depth >= 55 && h.slot.role !== 'DEF') { if (rng() < 0.08 * men.shoot) { shotKind = 'shot'; edge = true; } }
-      else if (depth >= 40 && (h.slot.role === 'MID' || h.slot.role === 'FWD')) {
-        if (rng() < 0.05 * men.shoot * (0.6 + h.player.fk / 200)) shotKind = 'long';
+      const shooter = clamp((eff(h, 'sho') - 55) / 30, 0.3, 1.45); // sho 85 -> 1
+      const longRange = clamp((0.6 * eff(h, 'sho') + 0.4 * h.player.fk - 68) / 18, 0.15, 1.4);
+      const onGoal = chance && !isGK && depth >= 60;
+      chance = false;
+      if (fromCross) {
+        // met in the air: strong players head it, good finishers may volley or control and shoot
+        const r = rng();
+        const pHead = clamp(0.32 + (h.player.phy - 70) / 70, 0.18, 0.62);
+        if (r < pHead) shotKind = 'header';
+        else if (r < pHead + 0.22 * shooter) shotKind = 'shot';
       }
+      else if (onGoal) { if (rng() < clamp(0.6 * men.shoot * shooter, 0.35, 0.85)) shotKind = 'shot'; }
+      else if (depth >= 70) { if (rng() < 0.15 * men.shoot * shooter) shotKind = 'shot'; }
+      else if (depth >= 58 && h.slot.role !== 'DEF') { if (rng() < 0.08 * men.shoot * shooter) { shotKind = 'shot'; edge = true; } }
+      else if (depth >= 54 && (h.slot.role === 'MID' || h.slot.role === 'FWD')) {
+        if (rng() < 0.04 * men.shoot * longRange) shotKind = 'long';
+      }
+      const crossShot = fromCross;
       fromCross = false;
-      if (shotKind) { shoot(shotKind, holder, edge); continue; }
+      if (shotKind) { shoot(shotKind, holder, edge, shotKind === 'header' || crossShot ? 88 : depth); continue; }
+
+      // --- Wing play: a wide player runs down the line to get to the byline ------
+      const onFlank = Math.abs(h.slot.y - 50) >= 30; // real wide players (wingers, full-backs, wide mids)
+      const wasWingRun = wingRun;
+      wingRun = false;
+      if (!isGK && onFlank && !onGoal && depth >= 45 && depth < 82 && carried.n < 2) {
+        const fullback = h.slot.role === 'DEF';
+        const styleMul = { possession: 0.8, balanced: 1, counter: 1.2, direct: 1.2 }[team.tac.style] || 1;
+        const pRun = clamp((eff(h, 'pac') - 68) / 90 + ((h.player.dri ?? 60) - 70) / 150, 0.04, 0.32) * styleMul * (fullback ? 0.45 : 1);
+        if (rng() < pRun) {
+          const by = nearestOpponent(oppSide, depth + 6, h.slot.y, (e) => e.slot.role !== 'GK');
+          const m = T[oppSide].lineup[by];
+          // a race down the line: pace first, then dribbling against the full-back
+          const pWin = clamp(0.5 + (eff(h, 'pac') - eff(m, 'pac')) / 70 + (eff(h, 'dri') - eff(m, 'def')) / 140, 0.25, 0.85);
+          minute += 0.25 + rng() * 0.2;
+          stats[side].dribbles++;
+          if (rng() < pWin) {
+            stats[side].dribblesWon++;
+            const adv = 10 + rng() * 8;
+            events.push({ type: 'dribble', side, from: holder, by, ok: true, wing: true, minute: Math.floor(minute) });
+            carry = { key: side + holder, adv: carried.adv + adv, n: 2 };
+            wingRun = true;
+            maybeFoul(holder, { x: Math.min(92, depth + adv), y: h.slot.y });
+          } else {
+            events.push({ type: 'dribble', side, from: holder, by, ok: false, wing: true, minute: Math.floor(minute) });
+            turnover(oppSide, by);
+          }
+          continue;
+        }
+      }
 
       // --- Dribble: good dribblers sometimes take a defender on ----------------
       // Success gains ground (and maybe a foul); failure loses the ball to the tackler.
       if (!isGK && depth >= 30 && carried.n < 2) {
         const styleMul = { possession: 1, balanced: 1, counter: 1.3, direct: 0.7 }[team.tac.style] || 1;
-        const pTry = clamp(((h.player.dri ?? 60) - 70) / 100, 0, 0.24) * styleMul * (h.slot.role === 'DEF' ? 0.4 : 1);
+        let pTry = clamp(((h.player.dri ?? 60) - 70) / 100, 0, 0.24) * styleMul * (h.slot.role === 'DEF' ? 0.4 : 1);
+        if (onGoal) pTry = clamp(0.45 + ((h.player.dri ?? 60) - 75) / 60, 0.3, 0.75);
         if (rng() < pTry) {
           const by = nearestOpponent(oppSide, depth + 6, h.slot.y, (e) => e.slot.role !== 'GK');
           const m = T[oppSide].lineup[by];
@@ -542,6 +596,7 @@
             events.push({ type: 'dribble', side, from: holder, by, ok: true, minute: Math.floor(minute) });
             carry = { key: side + holder, adv: carried.adv + adv, n: carried.n + 1 };
             space = Math.max(space, 0.04);
+            chance = depth + adv >= 68; // beat the defender in or near the box
             maybeFoul(holder, { x: Math.min(92, depth + adv), y: h.slot.y });
           } else {
             events.push({ type: 'dribble', side, from: holder, by, ok: false, minute: Math.floor(minute) });
@@ -549,6 +604,41 @@
           }
           continue;
         }
+      }
+
+      // --- Delivery from the flank: cross (to the strongest in the air) or cut-back --
+      const boxRunners = active(side).filter((o) => o.i !== holder && o.e.slot.role !== 'GK'
+        && (o.e.slot.role === 'FWD' || (o.e.slot.role === 'MID' && Math.abs(o.e.slot.y - 50) < 30)));
+      if (!isGK && onFlank && boxRunners.length && (wasWingRun || depth >= 70)
+        && rng() < (wasWingRun ? 0.85 : 0.35) * Math.min(1.3, sty.cross)) {
+        const byline = depth >= 72;
+        const kind = byline && rng() < 0.6 ? 'cutback' : 'cross';
+        const tgt = pickWeighted(rng, boxRunners, (o) => (kind === 'cross'
+          ? Math.pow(o.e.player.phy / 70, 3) * (o.e.slot.role === 'FWD' ? 1.5 : 0.8)
+          : (o.e.slot.role === 'MID' ? 1.4 : 1) * Math.pow(eff(o.e, 'sho') / 75, 2)));
+        const markerIdx = nearestOpponent(oppSide, 76, tgt.e.slot.y, (e) => e.slot.role !== 'GK');
+        const marker = T[oppSide].lineup[markerIdx].player;
+        const deliverer = 0.5 * eff(h, 'pas') + 0.5 * h.player.fk;
+        let p = 0.6 + (deliverer - pressure(oppSide, 75)) / 140 + PASS_MOD[kind] + (wasWingRun ? 0.1 : 0);
+        p += kind === 'cross' ? (tgt.e.player.phy - marker.phy) / 120 + (sty.aerial || 0) + (hasFullbacks(oppSide) ? 0 : 0.08)
+          : (eff(tgt.e, 'pac') - marker.pac) / 200;
+        stats[side].passes++;
+        minute += 0.35 + rng() * 0.2;
+        if (rng() < clamp(p, 0.3, 0.85)) {
+          stats[side].completed++;
+          events.push({ type: 'pass', kind, side, from: holder, to: tgt.i, minute: Math.floor(minute) });
+          lastPasser = holder;
+          holder = tgt.i;
+          if (kind === 'cross') { carry = { key: null, adv: 0, n: 0 }; fromCross = true; }
+          else { carry = { key: side + tgt.i, adv: Math.max(0, 74 - tgt.e.slot.x), n: 2 }; chance = true; }
+        } else {
+          const keeper = kind === 'cross' && rng() < 0.3;
+          const by = keeper ? gkOf(oppSide) : markerIdx;
+          events.push({ type: 'intercept', kind, side, from: holder, to: tgt.i, by, minute: Math.floor(minute) });
+          if (!keeper && rng() < (kind === 'cross' ? 0.35 : 0.2)) { setPiece = { type: 'corner', side }; continue; }
+          turnover(oppSide, by);
+        }
+        continue;
       }
 
       // --- Pass ------------------------------------------------------------
@@ -561,11 +651,17 @@
       const target = pickWeighted(rng, candidates, (o) => {
         const forward = o.e.slot.x - depth;
         const dist = Math.hypot(forward, o.e.slot.y - h.slot.y);
-        const progress = forward > -5 ? 1 + (forward / 18) * men.forward * (countering ? 1.5 : 1) : 0.35;
+        // backward passes are short lay-offs, rarely a long ball back to the defence,
+        // and the further up the pitch the holder is, the less he looks back
+        const back = -forward;
+        const lookBack = depth >= 55 ? 0.22 : 0.35;
+        const maxBack = onGoal ? 15 : depth >= 62 ? 30 : Infinity;
+        const progress = forward > -5 ? 1 + (forward / 18) * men.forward * (countering ? 1.5 : 1)
+          : back > maxBack ? 0 : lookBack * Math.exp(-Math.max(0, back - 5) / 18);
         const reach = dist > 50 && !goLong ? 0.25 : 1;
         const inBox = o.e.slot.role === 'FWD' || (o.e.slot.role === 'MID' && o.e.slot.x >= 55 && Math.abs(o.e.slot.y - 50) < 20);
         const boxBias = wide && inBox ? 2 : 1;
-        return Math.max(0.05, progress * reach * boxBias);
+        return progress === 0 ? 1e-6 : Math.max(0.005, progress * reach * boxBias);
       });
 
       const t = target.e.slot;
@@ -606,6 +702,18 @@
         lastPasser = holder;
         holder = target.i;
         carry = { key: null, adv: 0, n: 0 };
+        // cut-back / lay-off from the final third: a midfielder arriving late into the box
+        // takes it there (the better the attacker, the more often he makes the run)
+        if (!isGK && depth >= 62 && target.e.slot.role === 'MID' && t.x < 70 && kind === 'short'
+          && rng() < 0.45 * clamp((eff(target.e, 'att') - 60) / 30, 0.2, 1.2)) {
+          carry = { key: side + target.i, adv: 72 - t.x, n: 2 };
+          chance = true;
+        }
+        // a through ball into the final third puts the runner in behind the line
+        if (kind === 'through' && t.x >= 60) {
+          carry = { key: side + target.i, adv: Math.max(0, 76 - t.x), n: 1 };
+          chance = true;
+        }
         fromCross = kind === 'cross';
         maybeFoul(target.i, t);
       } else {

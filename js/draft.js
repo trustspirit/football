@@ -295,19 +295,26 @@
     return `<div class="bench"><span class="bench__label">벤치 <small>${team.bench.filter(Boolean).length}/${BENCH}</small></span><div class="bench__row">${cells}</div></div>`;
   }
 
+  // The four numbers that matter most for the position (all of them are in the tooltip).
+  const CARD_STATS = {
+    GK: [['선방', 'def'], ['킥', 'fk']],
+    DEF: [['수', 'def'], ['속', 'pac'], ['피', 'phy'], ['패', 'pas']],
+    MID: [['패', 'pas'], ['드', 'dri'], ['슛', 'sho'], ['FK', 'fk']],
+    FWD: [['속', 'pac'], ['드', 'dri'], ['슛', 'sho'], ['패', 'pas']],
+  };
+  const cardStats = (p) => CARD_STATS[p.pos].map(([label, k]) => `<i>${label}</i>${p[k]}`).join('');
+
   function cardHTML(p) {
     const mine = inTeam(state.step, p.id);
     const rival = inTeam(otherSide(), p.id);
-    const tip = `속도 ${p.pac} · 드리블 ${p.dri} · 공격 ${p.att} · 패스 ${p.pas} · ${p.pos === 'GK' ? '선방' : '수비'} ${p.def} · 피지컬 ${p.phy} · 킥 ${p.fk}`;
+    const tip = `속도 ${p.pac} · 드리블 ${p.dri} · 슈팅 ${p.sho} · 프리킥 ${p.fk} · 공격 ${p.att} · 패스 ${p.pas} · ${p.pos === 'GK' ? '선방' : '수비'} ${p.def} · 피지컬 ${p.phy}`;
     return `
       <button class="pc${mine ? ' is-mine' : ''}" data-id="${p.id}" data-drag="card" title="${tip}">
         ${Photos.html(p, 'pc__photo')}
         <span class="pc__body">
           <b class="pc__ko">${p.ko}</b>
           <small class="pc__en">${p.name} · ${p.nat}</small>
-          <span class="pc__stats">${p.pos === 'GK'
-            ? `<i>선방</i>${p.def}<i>킥</i>${p.fk}`
-            : `<i>속</i>${p.pac}<i>드</i>${p.dri}<i>공</i>${p.att}<i>패</i>${p.pas}<i>수</i>${p.def}`}</span>
+          <span class="pc__stats">${cardStats(p)}</span>
         </span>
         <span class="pc__ovr">${p.ovr}</span>
         ${mine ? '<span class="pc__flag">✓</span>' : ''}
