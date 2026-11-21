@@ -1415,7 +1415,6 @@
       b.setAttribute('aria-selected', String(b.dataset.tab === name));
     });
     $('#res-stats').hidden = name !== 'stats';
-    $('#res-flow').hidden = name !== 'stats';
     $('#res-ratings').hidden = name !== 'ratings';
   }
   document.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));

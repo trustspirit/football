@@ -33,6 +33,11 @@
       <section class="pool">
         <div class="pool__bar">
           <p class="pool__tip" id="pool-tip"></p>
+          <div class="era" id="era" role="radiogroup" aria-label="선수 풀">
+            <button data-era="all" role="radio">전체</button>
+            <button data-era="now" role="radio">현역</button>
+            <button data-era="legend" role="radio">레전드</button>
+          </div>
           <input id="search" type="search" placeholder="이름 검색 (한글/영문)" enterkeyhint="done" autocomplete="off">
         </div>
         <div class="pool__cols" id="pool"></div>

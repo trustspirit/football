@@ -25,6 +25,7 @@
     step: 'home',
     targetSlot: null,
     query: '',
+    era: 'all', // player pool: all / now (current players) / legend
     teams: { home: newTeam('Paper FC', '4-3-3'), away: newTeam('Ink United', '4-4-2') },
   };
 
@@ -38,7 +39,9 @@
   // ---------- search ----------
   const norm = (v) => v.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[\s.\-']/g, '').toLowerCase();
   PLAYERS.forEach((p) => { p._search = norm([p.name, p.ko, p.short, p.nat].join(' ')); });
-  const matches = (p) => !state.query || p._search.includes(norm(state.query));
+  const inEra = (p) => state.era === 'all' || (state.era === 'legend' ? !!p.legend : !p.legend);
+  const matches = (p) => inEra(p) && (!state.query || p._search.includes(norm(state.query)));
+  PLAYERS.forEach((p) => { if (p.legend) p._search += norm('legend 레전드'); });
 
   // ---------- squad mutations ----------
   // Put `id` at a pitch slot or bench spot. If the player was already in the team,
@@ -99,7 +102,7 @@
     const used = new Set(team.slots.filter(Boolean));
     FORMATIONS[team.formation].forEach((slot, i) => {
       if (team.slots[i]) return;
-      const options = PLAYERS.filter((p) => p.pos === slot.role && !used.has(p.id));
+      const options = PLAYERS.filter((p) => p.pos === slot.role && inEra(p) && !used.has(p.id));
       if (!options.length) return;
       const pick = options[Math.floor(Math.random() * options.length)];
       team.slots[i] = pick.id;
@@ -109,7 +112,7 @@
       // a balanced bench: GK, DEF, MID, and two attackers
       ['GK', 'DEF', 'MID', 'FWD', 'FWD'].forEach((role, i) => {
         if (team.bench[i]) { used.add(team.bench[i]); return; }
-        const options = PLAYERS.filter((p) => p.pos === role && !used.has(p.id));
+        const options = PLAYERS.filter((p) => p.pos === role && inEra(p) && !used.has(p.id));
         if (!options.length) return;
         const pick = options[Math.floor(Math.random() * options.length)];
         team.bench[i] = pick.id;
@@ -309,11 +312,11 @@
     const rival = inTeam(otherSide(), p.id);
     const tip = `속도 ${p.pac} · 드리블 ${p.dri} · 슈팅 ${p.sho} · 프리킥 ${p.fk} · 공격 ${p.att} · 패스 ${p.pas} · ${p.pos === 'GK' ? '선방' : '수비'} ${p.def} · 피지컬 ${p.phy}`;
     return `
-      <button class="pc${mine ? ' is-mine' : ''}" data-id="${p.id}" data-drag="card" title="${tip}">
+      <button class="pc${mine ? ' is-mine' : ''}${p.legend ? ' is-legend' : ''}" data-id="${p.id}" data-drag="card" title="${tip}">
         ${Photos.html(p, 'pc__photo')}
         <span class="pc__body">
           <b class="pc__ko">${p.ko}</b>
-          <small class="pc__en">${p.name} · ${p.nat}</small>
+          <small class="pc__en">${p.legend ? '<b class="pc__legend">★ LEGEND</b> ' : ''}${p.name} · ${p.nat}</small>
           <span class="pc__stats">${cardStats(p)}</span>
         </span>
         <span class="pc__ovr">${p.ovr}</span>
@@ -352,6 +355,10 @@
   }
 
   function render() {
+    document.querySelectorAll('#era [data-era]').forEach((b) => {
+      b.classList.toggle('is-on', b.dataset.era === state.era);
+      b.setAttribute('aria-checked', String(b.dataset.era === state.era));
+    });
     $('#steps').innerHTML = stepsHTML();
     const teamEl = $('#team');
     teamEl.dataset.side = state.step;
@@ -575,6 +582,12 @@
   });
   // system gesture / interruption: drop the drag without placing anything
   document.addEventListener('touchcancel', () => { if (drag.src) cleanupDrag(); });
+
+  // ---------- player pool: all / current / legends ----------
+  document.querySelectorAll('#era [data-era]').forEach((b) => b.addEventListener('click', () => {
+    state.era = b.dataset.era;
+    render();
+  }));
 
   // ---------- search ----------
   const search = $('#search');

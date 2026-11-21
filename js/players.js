@@ -232,6 +232,80 @@
     ['suzuki', 'Zion Suzuki', 'Zion Suzuki', 'GK', 'JPN', 10, 70, 81],
   ];
 
+  // Legends, rated at their peak. [id, name, wiki, pos, nat, att, pas, def, pac, phy, fk, dri, sho, ko, short]
+  const LEGENDS = [
+    // FWD
+    ['pele', 'Pelé', 'Pelé', 'FWD', 'BRA', 97, 90, 40, 92, 80, 88, 95, 96, '펠레', '펠레'],
+    ['maradona', 'Diego Maradona', 'Diego Maradona', 'FWD', 'ARG', 96, 93, 35, 88, 70, 93, 97, 92, '디에고 마라도나', '마라도나'],
+    ['cruyff', 'Johan Cruyff', 'Johan Cruyff', 'FWD', 'NED', 94, 93, 40, 90, 70, 85, 95, 90, '요한 크라위프', '크라위프'],
+    ['r9', 'Ronaldo Nazário', 'Ronaldo (Brazilian footballer)', 'FWD', 'BRA', 97, 80, 35, 96, 82, 78, 95, 96, '호나우두', '호나우두'],
+    ['henry', 'Thierry Henry', 'Thierry Henry', 'FWD', 'FRA', 94, 85, 38, 95, 78, 82, 91, 93, '티에리 앙리', '앙리'],
+    ['vanbasten', 'Marco van Basten', 'Marco van Basten', 'FWD', 'NED', 95, 80, 38, 84, 85, 80, 88, 96, '마르코 판바스턴', '판바스턴'],
+    ['eusebio', 'Eusébio', 'Eusébio', 'FWD', 'POR', 94, 80, 35, 93, 80, 88, 89, 95, '에우제비우', '에우제비우'],
+    ['gerdmuller', 'Gerd Müller', 'Gerd Müller', 'FWD', 'GER', 94, 72, 35, 80, 82, 70, 82, 97, '게르트 뮐러', '게르트 뮐러'],
+    ['romario', 'Romário', 'Romário', 'FWD', 'BRA', 94, 78, 30, 88, 66, 75, 92, 95, '호마리우', '호마리우'],
+    ['ronaldinho', 'Ronaldinho', 'Ronaldinho', 'FWD', 'BRA', 92, 92, 35, 88, 78, 93, 97, 88, '호나우지뉴', '호나우지뉴'],
+    ['best', 'George Best', 'George Best', 'FWD', 'NIR', 93, 84, 38, 92, 68, 78, 96, 89, '조지 베스트', '베스트'],
+    ['distefano', 'Alfredo Di Stéfano', 'Alfredo Di Stéfano', 'FWD', 'ARG', 94, 88, 55, 86, 80, 80, 90, 93, '알프레도 디스테파노', '디스테파노'],
+    ['puskas', 'Ferenc Puskás', 'Ferenc Puskás', 'FWD', 'HUN', 95, 86, 35, 80, 72, 90, 88, 97, '페렌츠 푸스카스', '푸스카스'],
+    ['shevchenko', 'Andriy Shevchenko', 'Andriy Shevchenko', 'FWD', 'UKR', 92, 78, 38, 90, 80, 80, 86, 93, '안드리 셰우첸코', '셰우첸코'],
+    ['baggio', 'Roberto Baggio', 'Roberto Baggio', 'FWD', 'ITA', 92, 90, 30, 84, 62, 94, 92, 91, '로베르토 바조', '바조'],
+    ['ibrahimovic', 'Zlatan Ibrahimović', 'Zlatan Ibrahimović', 'FWD', 'SWE', 92, 84, 40, 78, 92, 85, 87, 93, '즐라탄 이브라히모비치', '즐라탄'],
+    ['rooney', 'Wayne Rooney', 'Wayne Rooney', 'FWD', 'ENG', 90, 86, 50, 84, 82, 84, 86, 90, '웨인 루니', '루니'],
+    ['drogba', 'Didier Drogba', 'Didier Drogba', 'FWD', 'CIV', 90, 76, 42, 84, 93, 85, 82, 91, '디디에 드로그바', '드로그바'],
+    ['raul', 'Raúl', 'Raúl (footballer)', 'FWD', 'ESP', 91, 82, 38, 82, 66, 76, 86, 91, '라울 곤살레스', '라울'],
+    ['chabumkun', 'Cha Bum-kun', 'Cha Bum-kun', 'FWD', 'KOR', 91, 76, 38, 93, 86, 78, 86, 92, '차범근', '차범근'],
+    ['etoo', "Samuel Eto'o", "Samuel Eto'o", 'FWD', 'CMR', 91, 78, 40, 93, 78, 74, 88, 91, '사뮈엘 에토', '에토'],
+    ['batistuta', 'Gabriel Batistuta', 'Gabriel Batistuta', 'FWD', 'ARG', 92, 72, 35, 84, 86, 84, 80, 95, '가브리엘 바티스투타', '바티스투타'],
+    ['shearer', 'Alan Shearer', 'Alan Shearer', 'FWD', 'ENG', 91, 74, 40, 80, 88, 82, 78, 94, '앨런 시어러', '시어러'],
+    ['figo', 'Luís Figo', 'Luís Figo', 'FWD', 'POR', 88, 90, 45, 88, 72, 84, 92, 84, '루이스 피구', '피구'],
+    // MID
+    ['zidane', 'Zinedine Zidane', 'Zinedine Zidane', 'MID', 'FRA', 90, 96, 60, 78, 84, 88, 96, 88, '지네딘 지단', '지단'],
+    ['platini', 'Michel Platini', 'Michel Platini', 'MID', 'FRA', 91, 94, 45, 78, 70, 96, 88, 92, '미셸 플라티니', '플라티니'],
+    ['xavi', 'Xavi', 'Xavi (footballer, born 1980)', 'MID', 'ESP', 76, 97, 70, 70, 64, 82, 90, 76, '사비 에르난데스', '사비'],
+    ['iniesta', 'Andrés Iniesta', 'Andrés Iniesta', 'MID', 'ESP', 85, 95, 62, 78, 62, 78, 95, 80, '안드레스 이니에스타', '이니에스타'],
+    ['matthaus', 'Lothar Matthäus', 'Lothar Matthäus', 'MID', 'GER', 84, 88, 88, 82, 84, 84, 84, 87, '로타어 마테우스', '마테우스'],
+    ['kaka', 'Kaká', 'Kaká', 'MID', 'BRA', 91, 90, 45, 92, 76, 80, 92, 88, '카카', '카카'],
+    ['gerrard', 'Steven Gerrard', 'Steven Gerrard', 'MID', 'ENG', 86, 92, 75, 82, 84, 88, 84, 90, '스티븐 제라드', '제라드'],
+    ['lampard', 'Frank Lampard', 'Frank Lampard', 'MID', 'ENG', 87, 90, 68, 74, 78, 86, 80, 91, '프랭크 램퍼드', '램퍼드'],
+    ['pirlo', 'Andrea Pirlo', 'Andrea Pirlo', 'MID', 'ITA', 76, 97, 66, 64, 62, 96, 86, 82, '안드레아 피를로', '피를로'],
+    ['scholes', 'Paul Scholes', 'Paul Scholes', 'MID', 'ENG', 82, 94, 68, 68, 70, 86, 84, 88, '폴 스콜스', '스콜스'],
+    ['zico', 'Zico', 'Zico (footballer)', 'MID', 'BRA', 92, 93, 40, 80, 64, 97, 92, 92, '지쿠', '지쿠'],
+    ['charlton', 'Bobby Charlton', 'Bobby Charlton', 'MID', 'ENG', 90, 90, 55, 82, 74, 88, 86, 93, '보비 찰턴', '찰턴'],
+    ['parkjisung', 'Park Ji-sung', 'Park Ji-sung', 'MID', 'KOR', 80, 84, 78, 84, 78, 70, 84, 78, '박지성', '박지성'],
+    ['seedorf', 'Clarence Seedorf', 'Clarence Seedorf', 'MID', 'NED', 84, 90, 74, 78, 82, 84, 86, 85, '클라렌스 세이도르프', '세이도르프'],
+    ['vieira', 'Patrick Vieira', 'Patrick Vieira', 'MID', 'FRA', 76, 86, 90, 80, 90, 70, 84, 76, '파트리크 비에이라', '비에이라'],
+    ['beckham', 'David Beckham', 'David Beckham', 'MID', 'ENG', 80, 95, 62, 76, 72, 97, 80, 84, '데이비드 베컴', '베컴'],
+    ['nedved', 'Pavel Nedvěd', 'Pavel Nedvěd', 'MID', 'CZE', 88, 88, 62, 84, 78, 88, 86, 90, '파벨 네드베드', '네드베드'],
+    // DEF
+    ['beckenbauer', 'Franz Beckenbauer', 'Franz Beckenbauer', 'DEF', 'GER', 70, 92, 95, 82, 82, 80, 86, 75, '프란츠 베켄바워', '베켄바워'],
+    ['maldini', 'Paolo Maldini', 'Paolo Maldini', 'DEF', 'ITA', 60, 84, 97, 86, 84, 70, 80, 62, '파올로 말디니', '말디니'],
+    ['baresi', 'Franco Baresi', 'Franco Baresi', 'DEF', 'ITA', 50, 84, 96, 78, 78, 70, 74, 58, '프랑코 바레시', '바레시'],
+    ['bobbymoore', 'Bobby Moore', 'Bobby Moore', 'DEF', 'ENG', 48, 84, 94, 70, 80, 66, 70, 55, '보비 무어', '보비 무어'],
+    ['cafu', 'Cafu', 'Cafu', 'DEF', 'BRA', 74, 84, 88, 90, 80, 72, 86, 70, '카푸', '카푸'],
+    ['robertocarlos', 'Roberto Carlos', 'Roberto Carlos', 'DEF', 'BRA', 78, 84, 86, 94, 80, 95, 86, 84, '호베르투 카를루스', '카를루스'],
+    ['cannavaro', 'Fabio Cannavaro', 'Fabio Cannavaro', 'DEF', 'ITA', 45, 76, 96, 84, 86, 60, 70, 52, '파비오 칸나바로', '칸나바로'],
+    ['puyol', 'Carles Puyol', 'Carles Puyol', 'DEF', 'ESP', 48, 76, 93, 80, 90, 60, 66, 55, '카를레스 푸욜', '푸욜'],
+    ['nesta', 'Alessandro Nesta', 'Alessandro Nesta', 'DEF', 'ITA', 45, 80, 95, 82, 84, 58, 72, 50, '알레산드로 네스타', '네스타'],
+    ['terry', 'John Terry', 'John Terry', 'DEF', 'ENG', 52, 76, 92, 70, 90, 62, 62, 60, '존 테리', '테리'],
+    ['ferdinand', 'Rio Ferdinand', 'Rio Ferdinand', 'DEF', 'ENG', 48, 82, 92, 84, 84, 60, 74, 55, '리오 퍼디낸드', '퍼디낸드'],
+    ['lahm', 'Philipp Lahm', 'Philipp Lahm', 'DEF', 'GER', 70, 90, 90, 84, 66, 74, 86, 68, '필리프 람', '람'],
+    ['hongmyungbo', 'Hong Myung-bo', 'Hong Myung-bo', 'DEF', 'KOR', 55, 86, 90, 74, 78, 80, 72, 64, '홍명보', '홍명보'],
+    ['desailly', 'Marcel Desailly', 'Marcel Desailly', 'DEF', 'FRA', 50, 78, 92, 82, 90, 58, 68, 56, '마르셀 드사이', '드사이'],
+    ['lthuram', 'Lilian Thuram', 'Lilian Thuram', 'DEF', 'FRA', 55, 78, 93, 86, 88, 58, 72, 58, '릴리앙 튀랑', '릴리앙 튀랑'],
+    // GK (def = shot-stopping)
+    ['yashin', 'Lev Yashin', 'Lev Yashin', 'GK', 'URS', 10, 74, 96, 55, 86, 70, 30, 20, '레프 야신', '야신'],
+    ['buffon', 'Gianluigi Buffon', 'Gianluigi Buffon', 'GK', 'ITA', 10, 74, 95, 55, 84, 72, 30, 20, '잔루이지 부폰', '부폰'],
+    ['casillas', 'Iker Casillas', 'Iker Casillas', 'GK', 'ESP', 10, 70, 93, 60, 76, 68, 30, 20, '이케르 카시야스', '카시야스'],
+    ['kahn', 'Oliver Kahn', 'Oliver Kahn', 'GK', 'GER', 10, 70, 93, 52, 88, 70, 30, 20, '올리버 칸', '칸'],
+    ['schmeichel', 'Peter Schmeichel', 'Peter Schmeichel', 'GK', 'DEN', 10, 76, 93, 54, 88, 74, 30, 20, '페테르 슈마이켈', '슈마이켈'],
+    ['zoff', 'Dino Zoff', 'Dino Zoff', 'GK', 'ITA', 10, 70, 92, 50, 80, 66, 30, 20, '디노 조프', '조프'],
+    ['banks', 'Gordon Banks', 'Gordon Banks', 'GK', 'ENG', 10, 70, 93, 52, 80, 66, 30, 20, '고든 뱅크스', '뱅크스'],
+    ['vandersar', 'Edwin van der Sar', 'Edwin van der Sar', 'GK', 'NED', 10, 84, 91, 50, 80, 76, 30, 20, '에드윈 판데르사르', '판데르사르'],
+    ['cech', 'Petr Čech', 'Petr Čech', 'GK', 'CZE', 10, 72, 92, 52, 86, 68, 30, 20, '페트르 체흐', '체흐'],
+    ['leewoonjae', 'Lee Woon-jae', 'Lee Woon-jae', 'GK', 'KOR', 10, 70, 86, 50, 82, 68, 30, 20, '이운재', '이운재'],
+  ];
+
   const WEIGHTS = {
     FWD: [0.75, 0.2, 0.05],
     MID: [0.3, 0.55, 0.15],
@@ -571,6 +645,14 @@
       photo: PHOTO_URL[id] || null,
       ovr: Math.round(att * wa + pas * wp + def * wd),
     };
+  });
+  LEGENDS.forEach(([id, name, wiki, pos, nat, att, pas, def, pac, phy, fk, dri, sho, ko, short]) => {
+    const [wa, wp, wd] = WEIGHTS[pos];
+    window.PLAYERS.push({
+      id, name, ko, short, wiki, pos, nat, att, pas, def, pac, phy, fk, dri, sho,
+      commons: null, photo: null, legend: true,
+      ovr: Math.round(att * wa + pas * wp + def * wd),
+    });
   });
   window.PLAYER_BY_ID = Object.fromEntries(window.PLAYERS.map((p) => [p.id, p]));
 })();

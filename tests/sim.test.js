@@ -404,3 +404,24 @@ test('xG is recorded for every shot and adds up to a sensible match total', () =
   });
   assert.ok(Math.abs(xg - goals) / goals < 0.15, `xG ${(xg / N).toFixed(2)} vs goals ${(goals / N).toFixed(2)} per match`);
 });
+
+test('legends: a pool of all-time greats with full skills that plays like anyone else', () => {
+  const legends = PLAYERS.filter((p) => p.legend);
+  assert.ok(legends.length >= 60, `legends ${legends.length}`);
+  ['GK', 'DEF', 'MID', 'FWD'].forEach((pos) => assert.ok(legends.filter((p) => p.pos === pos).length >= 10, pos));
+  const ids = PLAYERS.map((p) => p.id);
+  assert.equal(new Set(ids).size, ids.length, 'ids are unique');
+  legends.forEach((p) => {
+    ['att', 'pas', 'def', 'pac', 'phy', 'fk', 'dri', 'sho', 'ovr'].forEach((k) => assert.ok(p[k] >= 10 && p[k] <= 99, `${p.id}.${k}=${p[k]}`));
+    assert.ok(p.ko && p.short && p.wiki, p.id);
+  });
+  const pick = (ids2, f) => FORMATIONS[f].map((slot, i) => ({ player: PLAYER_BY_ID[ids2[i]], slot }));
+  const legendXI = pick(['yashin', 'cafu', 'beckenbauer', 'maldini', 'robertocarlos', 'xavi', 'zidane', 'matthaus', 'maradona', 'pele', 'cruyff'], '4-3-3');
+  let w = 0; let l = 0;
+  for (let s = 1; s <= 200; s++) {
+    const r = simulate(legendXI, weaker, s);
+    if (r.score.home > r.score.away) w++;
+    if (r.score.home < r.score.away) l++;
+  }
+  assert.ok(w > l * 2, `legends ${w} wins vs ${l} losses`);
+});
