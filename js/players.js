@@ -542,6 +542,11 @@
     kimminjae: 'Lebanon v South Korea, 14 November 2019 04 (Kim Min-jae).jpg',
   };
 
+  // Direct image URLs for players with no photo anywhere on Wikimedia (e.g. from Namuwiki).
+  const PHOTO_URL = {
+    castrop: 'https://i.namu.wiki/i/XsiIvNVpXAVg3bHiW4e1vyMNxTb3i7ZeWBJ3qfJF-bcD_cEO8d8hPYULjousqhRJJzPxDNM-ICqTFNEdLJSgt0vwlPeiA0BVW8dcUGL-zQbpKLa6VVvtt2LgGnfUo7vFg-tn91sW0AlgaFJk3wpxYQ.webp',
+  };
+
   window.PLAYERS = raw.map(([id, name, wiki, pos, nat, att, pas, def]) => {
     const [wa, wp, wd] = WEIGHTS[pos];
     const [ko, short] = KO[id] || [name, name.split(' ').slice(-1)[0]];
@@ -550,6 +555,7 @@
     return {
       id, name, ko, short, wiki, pos, nat, att, pas, def, pac, phy, fk, dri,
       commons: COMMONS[id] || null,
+      photo: PHOTO_URL[id] || null,
       ovr: Math.round(att * wa + pas * wp + def * wd),
     };
   });

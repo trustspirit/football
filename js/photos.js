@@ -32,8 +32,11 @@
     'https://commons.wikimedia.org/wiki/Special:FilePath/' + encodeURIComponent(file) + '?width=320';
 
   async function load(players) {
-    // Explicit Commons overrides win over the Wikipedia lead image.
-    players.forEach((p) => { if (p.commons) cache[p.id] = commonsUrl(p.commons); });
+    // Explicit overrides (direct URL, then Commons file) win over the Wikipedia lead image.
+    players.forEach((p) => {
+      if (p.photo) cache[p.id] = p.photo;
+      else if (p.commons) cache[p.id] = commonsUrl(p.commons);
+    });
     const missing = players.filter((p) => !(p.id in cache));
     for (let i = 0; i < missing.length; i += 50) {
       try { await fetchChunk(missing.slice(i, i + 50)); } catch (_) { save(); return i > 0; }
