@@ -51,6 +51,18 @@
     high: { ownHalf: -0.06, foul: 1.35, fwdLine: 6 },
   };
 
+  // Referees (fictional). Strictness 0.55 (lets play go on) .. 1.5 (card-happy).
+  const REFEREES = [
+    '김도윤', '박지훈', '이서준', '최민재', 'Marco Ferretti', 'Lukas Brandt', 'Jonas Vik', 'Ahmed Saleh',
+    'Pedro Alves', 'Tomás Ruiz', 'Liam Carter', 'Yuto Morita', 'Antoine Leclerc', 'Nikola Petrov',
+  ];
+  function pickReferee(seed) {
+    const r = mulberry32((seed ^ 0x9e3779b9) >>> 0); // own stream: does not disturb the match
+    const name = REFEREES[Math.floor(r() * REFEREES.length)];
+    const strict = Math.round((0.55 + 0.95 * ((r() + r()) / 2)) * 100) / 100; // most are middling
+    return { name, strict };
+  }
+
   // Tiredness (only with the stamina option): 100 energy = full strength, 0 = 75 %.
   const fatigue = (entry) => (entry.energy == null ? 1 : 0.75 + 0.25 * (entry.energy / 100));
 
@@ -167,6 +179,7 @@
   // opts: { stamina: bool, bench: { home: [player], away: [player] } }
   function simulate(home, away, seed, tactics, opts = {}) {
     const rng = mulberry32(seed >>> 0);
+    const referee = pickReferee(seed >>> 0);
     const stamina = !!opts.stamina;
     // Entries are copied: energy and substitutions must not leak into the caller's lineup.
     const prep = (lineup) => lineup.map((e) => ({ ...e, energy: stamina ? 100 : null }));
@@ -329,7 +342,7 @@
       const victim = T[side].lineup[victimIdx].player;
       const flair = 0.75 + (victim.pac + victim.att) / 400;
       const zone = t.x >= 60 ? 1.2 : 1;
-      const pf = 0.075 * PRESS[T[oppSide].tac.press].foul * flair * zone;
+      const pf = 0.075 * PRESS[T[oppSide].tac.press].foul * flair * zone * (0.85 + 0.15 * referee.strict);
       if (rng() >= pf) return false;
 
       minute += 0.6;
@@ -339,9 +352,12 @@
       os.fouls++;
       let card = null;
       const r = rng();
-      const yellowP = 0.2 + (t.x >= 70 ? 0.08 : 0);
-      if (r < 0.012) card = 'red';
-      else if (r < 0.012 + yellowP) card = T[oppSide].booked.has(by) ? 'second-yellow' : 'yellow';
+      // the referee decides how many fouls are bookable; a booked player goes in more carefully
+      const booked = T[oppSide].booked.has(by);
+      const yellowP = (0.15 + (t.x >= 70 ? 0.05 : 0)) * referee.strict * (booked ? 0.35 : 1);
+      const redP = 0.004 * referee.strict;
+      if (r < redP) card = 'red';
+      else if (r < redP + yellowP) card = booked ? 'second-yellow' : 'yellow';
       if (fouler.slot.role === 'GK' && card === 'red') card = 'yellow';
       if (card === 'yellow') { T[oppSide].booked.add(by); os.yellows++; }
       if (card === 'red' || card === 'second-yellow') {
@@ -749,7 +765,7 @@
 
     const ratings = rateMatch(events, startIds, score);
     return {
-      events, score, stats, seed, ratings,
+      events, score, stats, seed, ratings, referee,
       subs: { home: T.home.subs, away: T.away.subs },
       sentOff: { home: [...T.home.off], away: [...T.away.off] },
     };

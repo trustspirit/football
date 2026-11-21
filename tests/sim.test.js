@@ -312,3 +312,25 @@ test('penalties are scored at a realistic rate (~3 in 4), better takers score mo
   const poor = strong.map((e) => ({ ...e, player: { ...e.player, sho: 55, fk: 55 } }));
   assert.ok(rate(poor) < r - 0.05, 'a poor taker converts noticeably less');
 });
+
+test('each match has a referee; cards are realistic and depend on how strict he is', () => {
+  const N = 600;
+  let y = 0; let r = 0;
+  const strict = []; const lenient = [];
+  for (let s = 1; s <= N; s++) {
+    const res = simulate(strong, weaker, s);
+    assert.ok(res.referee && res.referee.name, 'referee named');
+    assert.ok(res.referee.strict >= 0.5 && res.referee.strict <= 1.6, `strictness ${res.referee.strict}`);
+    const yy = res.stats.home.yellows + res.stats.away.yellows;
+    y += yy; r += res.stats.home.reds + res.stats.away.reds;
+    if (res.referee.strict >= 1.2) strict.push(yy);
+    if (res.referee.strict <= 0.8) lenient.push(yy);
+  }
+  assert.ok(y / N > 2 && y / N < 3.6, `yellows per match ${y / N}`);
+  assert.ok(r / N < 0.2, `reds per match ${r / N}`);
+  const avg = (a) => a.reduce((p, q) => p + q, 0) / a.length;
+  assert.ok(strict.length > 30 && lenient.length > 30, 'both kinds of referee turn up');
+  assert.ok(avg(strict) > avg(lenient) * 1.6, `strict ${avg(strict).toFixed(2)} vs lenient ${avg(lenient).toFixed(2)} yellows`);
+  // the same seed always gets the same referee
+  assert.deepEqual(simulate(strong, weaker, 7).referee, simulate(strong, weaker, 7).referee);
+});

@@ -80,7 +80,15 @@
       d = 2.5 + clamp((bD - 25) * 0.07, 0, 6) + (tac.press === 'high' ? 2 : 0);
       w = 50 + (bW - 50) * 0.3;
     } else {
-      d = 8 + s.x * 0.6 + (bD - 50) * 0.45 + (inPoss ? 8 : -2);
+      // the block follows the ball up the pitch (midfield most), and in the attacking third the
+      // side in possession pushes on: forwards into the box, midfield to its edge, full-backs overlap
+      const follow = bD < 50 ? 0.4 : { DEF: 0.55, MID: 0.65, FWD: 0.6 }[s.role] || 0.55;
+      d = 8 + s.x * 0.6 + (bD - 50) * follow + (inPoss ? 8 : -2);
+      if (inPoss) {
+        const a = clamp((bD - 55) / 25, 0, 1);
+        const fullback = s.role === 'DEF' && Math.abs(s.y - 50) >= 25;
+        d += a * (s.role === 'FWD' ? 10 : s.role === 'MID' ? 8 : fullback ? 14 : 4);
+      }
       d += MENT_SHIFT[tac.mentality] || 0;
       if (!inPoss) d += PRESS_SHIFT[tac.press] || 0;
       if (!inPoss && s.role === 'DEF') d = Math.min(d, Math.max(bD - 6, 8)); // hold a line behind the ball
@@ -595,7 +603,7 @@
     r.ov = null;
   }
 
-  async function doIntercept(ev) {
+  async function doIntercept(ev, next) {
     const S = ev.side;
     const D = other(S);
     const fromK = key(S, ev.from);
@@ -633,6 +641,16 @@
       await kick(out, aerial ? { air: true, T: 0.6, peakAbs: 1.5, h0: ball.h, h1: 0 } : { air: false, arrive: 4, dec: 4 });
       live.lastOut = { ...out };
       ball.alpha = 0;
+      r.ov = null;
+      return;
+    }
+    if (!keeper && next && next.type === 'corner' && next.side === S) {
+      // cleared behind the byline: the engine gives a corner, so the ball really goes out
+      const out = { x: goalLineX(S) + dirOf(S) * 1.5, y: next.top ? rand(6, 22) : H - rand(6, 22) };
+      d.ov = null;
+      await kick(out, aerial ? { air: true, T: 0.55, peakAbs: 2.4, h0: ball.h, h1: 0.4 } : { air: false, arrive: 6, dec: 3 });
+      ball.alpha = 0;
+      if (Math.random() < 0.5) log(mm(ev), `${playerOf(D, ev.by).short} ${aerial ? '헤딩' : '태클'}으로 걷어냄 — 코너킥`, D);
       r.ov = null;
       return;
     }
@@ -1001,6 +1019,7 @@
         Object.assign(ball, { p: { x: W / 2, y: H / 2 }, h: 0, mode: 'dead', holder: null, fl: null, alpha: 1, dest: null });
         const k = key(ev.side, ev.holder);
         agents[k].ov = { t: { x: W / 2 - dirOf(ev.side) * 0.7, y: H / 2 }, spd: 5 };
+        if (ev.minute === 0 && result.referee) log(0, `주심 ${result.referee.name} — ${refStyle(result.referee.strict)}`, null);
         if (ev.minute === 0 || ev.minute === 45) {
           log(mm(ev), `${teams[ev.side].name} 킥오프`, ev.side);
           Sound.whistle('short');
@@ -1032,7 +1051,7 @@
       case 'pass':
         return doPass({ ...ev, nextHeader: next && next.kind === 'header' && next.side === ev.side });
       case 'intercept':
-        return doIntercept(ev);
+        return doIntercept(ev, next);
       case 'foul':
         return doFoul(ev, next);
       case 'freekick':
@@ -1171,6 +1190,7 @@
       ['파울', h.fouls, a.fouls],
       ['경고 / 퇴장', `${h.yellows} / ${h.reds}`, `${a.yellows} / ${a.reds}`],
     ];
+    if (result.referee) rows.push(['주심', result.referee.name, refStyle(result.referee.strict)]);
     const table = $('#res-stats');
     table.innerHTML = '';
     rows.forEach(([label, hv, av]) => {
@@ -1182,6 +1202,13 @@
     showTab('stats');
     $('#result').hidden = false;
     $('#rematch').focus({ preventScroll: true });
+  }
+
+  // How card-happy the referee is (engine strictness 0.55 .. 1.5).
+  function refStyle(st) {
+    if (st >= 1.2) return '엄격한 판정 (카드 많음)';
+    if (st <= 0.8) return '관대한 판정 (카드 적음)';
+    return '보통 판정';
   }
 
   // Man of the match + per-player ratings (home | away), starters first, subs after.
