@@ -114,6 +114,31 @@
   }
   const roar = () => swell(0.55, 0.25, 1.6, 2.4, 700);
   const ooh = () => swell(0.22, 0.12, 0.35, 0.9, 520);
+  const groan = () => swell(0.18, 0.2, 0.5, 1.2, 380); // goal ruled out, chance gone
+
+  // Ball off the woodwork: a short metallic ring.
+  function post() {
+    if (!ready()) return;
+    const t = ctx.currentTime + 0.005;
+    [880, 1320, 2010].forEach((fq, i) => {
+      const o = ctx.createOscillator();
+      o.type = 'sine';
+      o.frequency.value = fq;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.16 / (i + 1), t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.45);
+      o.connect(g).connect(master);
+      o.start(t); o.stop(t + 0.5);
+    });
+    kick(0.9);
+  }
+
+  // Crowd murmur follows the danger: 0 (ball in midfield) .. 1 (in the box).
+  function tension(level) {
+    if (!crowd || !ctx) return;
+    const v = 0.06 + 0.1 * Math.max(0, Math.min(1, level));
+    crowd.g.gain.setTargetAtTime(v, ctx.currentTime, 0.5);
+  }
 
   // Low continuous murmur for the whole match.
   function crowdStart() {
@@ -155,7 +180,8 @@
   const safe = (fn) => (...args) => { try { return fn(...args); } catch (_) { return undefined; } };
   window.Sound = {
     unlock: safe(unlock), setEnabled: safe(setEnabled), whistle: safe(whistle), kick: safe(kick),
-    roar: safe(roar), ooh: safe(ooh), crowdStart: safe(crowdStart), crowdStop: safe(crowdStop),
+    roar: safe(roar), ooh: safe(ooh), groan: safe(groan), post: safe(post), tension: safe(tension),
+    crowdStart: safe(crowdStart), crowdStop: safe(crowdStop),
     isEnabled: () => enabled,
   };
 })();

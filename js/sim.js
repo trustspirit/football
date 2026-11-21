@@ -69,7 +69,8 @@
   // A player out of their natural role loses effectiveness (technical stats only).
   function eff(entry, stat) {
     const { player, slot } = entry;
-    const v = (player[stat] ?? (stat === 'dri' ? 60 : 70)) * fatigue(entry);
+    // form on the day (about +-3 %, up to +-8 %) and tiredness
+    const v = (player[stat] ?? (stat === 'dri' ? 60 : 70)) * fatigue(entry) * (entry.form ?? 1);
     if (stat === 'pac' || stat === 'phy' || stat === 'fk') return v;
     if (player.pos === slot.role) return v;
     if (player.pos === 'GK' || slot.role === 'GK') return v * 0.5;
@@ -172,7 +173,7 @@
     return {
       passes: 0, completed: 0, shots: 0, onTarget: 0, goals: 0,
       fouls: 0, yellows: 0, reds: 0, corners: 0, freekicks: 0, penalties: 0, throwins: 0,
-      dribbles: 0, dribblesWon: 0,
+      dribbles: 0, dribblesWon: 0, offsides: 0, woodwork: 0, xg: 0,
     };
   }
 
@@ -182,7 +183,14 @@
     const referee = pickReferee(seed >>> 0);
     const stamina = !!opts.stamina;
     // Entries are copied: energy and substitutions must not leak into the caller's lineup.
-    const prep = (lineup) => lineup.map((e) => ({ ...e, energy: stamina ? 100 : null }));
+    // Form on the day: its own random stream, so the rest of the match is not disturbed.
+    const formRng = mulberry32((seed ^ 0x85ebca6b) >>> 0);
+    const form = {};
+    const formOf = (id) => {
+      if (form[id] == null) form[id] = Math.round(clamp(1 + (formRng() + formRng() + formRng() - 1.5) * 0.055, 0.92, 1.08) * 1000) / 1000;
+      return form[id];
+    };
+    const prep = (lineup) => lineup.map((e) => ({ ...e, energy: stamina ? 100 : null, form: formOf(e.player.id) }));
     const T = {
       home: { lineup: prep(home), tac: { ...TACTIC_DEFAULT, ...(tactics && tactics.home) }, off: new Set(), booked: new Set(),
         bench: stamina ? [...((opts.bench && opts.bench.home) || [])].filter(Boolean) : [], subs: 0 },
@@ -212,6 +220,18 @@
     let carry = { key: null, adv: 0, n: 0 }; // ground gained by the current ball carrier's dribbles
     let chance = false;       // clear chance: in behind / beat the man in the box / arriving late
     let wingRun = false;      // just went down the line on the flank: look to cross
+    let inBehind = false;     // the chance came from a run in behind: an offside flag may follow
+    let rebound = false;      // the next shot is a second ball (parry / woodwork)
+
+    // Game state: late on, a team behind throws men forward and a team ahead sits on its lead.
+    const gameState = (s) => {
+      const diff = score[s] - score[other(s)];
+      const late = clamp((minute - (secondHalf ? 55 : 200)) / 35, 0, 1) * Math.min(2, Math.abs(diff));
+      if (!diff || !late) return { shoot: 1, forward: 1, waste: 0, exposed: 0 };
+      return diff < 0
+        ? { shoot: 1 + 0.3 * late, forward: 1 + 0.35 * late, waste: 0, exposed: 2.5 * late }
+        : { shoot: 1 - 0.25 * late, forward: 1 - 0.3 * late, waste: 0.12 * late, exposed: 0 };
+    };
 
     // ---------- helpers ----------
     const active = (s) => T[s].lineup.map((e, i) => ({ e, i })).filter((o) => !T[s].off.has(o.i));
@@ -257,7 +277,7 @@
       if (!line.length) return 45;
       const avg = line.reduce((s, o) => s + eff(o.e, 'def'), 0) / line.length;
       let p = avg * Math.pow(line.length / LINE_NORM[role], 0.15);
-      if (role === 'DEF') p += MENTALITY[tac.mentality].defLine;
+      if (role === 'DEF') p += MENTALITY[tac.mentality].defLine - gameState(oppSide).exposed;
       if (role === 'FWD') p += PRESS[tac.press].fwdLine;
       return p;
     };
@@ -267,6 +287,7 @@
     const restart = (s, idx, type) => {
       carry = { key: null, adv: 0, n: 0 };
       side = s; holder = idx; lastPasser = null; fromCross = false; counterLeft = 0; space = 0; chance = false; wingRun = false;
+      inBehind = false; rebound = false;
       // the kick-off is taken on the halfway line, not from the forward's usual spot
       if (type === 'kickoff') carry = { key: s + idx, adv: 50 - T[s].lineup[idx].slot.x, n: 2 };
       events.push({ type, side, holder, minute: Math.floor(minute) });
@@ -274,8 +295,10 @@
     const turnover = (newSide, idx) => {
       carry = { key: null, adv: 0, n: 0 };
       side = newSide; holder = idx; lastPasser = null; fromCross = false; space = 0; chance = false; wingRun = false;
+      inBehind = false; rebound = false;
       const tac = T[newSide].tac;
-      const oppAttacking = T[other(newSide)].tac.mentality === 'attacking';
+      // a side that has pushed everyone up leaves space to break into
+      const oppAttacking = T[other(newSide)].tac.mentality === 'attacking' || gameState(other(newSide)).exposed > 1;
       counterLeft = tac.style === 'counter' ? 3 : oppAttacking ? 2 : 0;
     };
 
@@ -311,12 +334,42 @@
         pGoal = clamp(0.2 + (a - gk) / 110 + mod.goal - range + menDown(oppSide) * 0.03, 0.04, 0.5);
       }
       const spot = x ?? (kind === 'penalty' ? 89 : kind === 'header' ? 90 : 70);
-      const base = { side, from: idx, kind, x: Math.round(spot), minute: Math.floor(minute), aimY: 38 + rng() * 24 };
+      const xg = Math.round(clamp(onTarget * pGoal, 0.01, 0.95) * 100) / 100;
+      st.xg += xg;
+      const base = { side, from: idx, kind, x: Math.round(spot), minute: Math.floor(minute), aimY: 38 + rng() * 24, xg };
+      if (rebound) base.rebound = true;
+      const wasInBehind = inBehind;
+      rebound = false;
+      inBehind = false;
+      // second ball in the box after a parry / the woodwork: an attacker (or a defender) gets there first
+      const secondBall = (pAtt) => {
+        if (rng() < pAtt) {
+          const att = active(side).filter((o) => o.e.slot.role !== 'GK' && o.i !== idx);
+          const pick = pickWeighted(rng, att, (o) => (o.e.slot.role === 'FWD' ? 3 : o.e.slot.role === 'MID' ? 1.5 : 0.4) * (eff(o.e, 'pac') / 80));
+          holder = pick.i;
+          lastPasser = null;
+          carry = { key: side + pick.i, adv: Math.max(0, 84 - pick.e.slot.x), n: 2 };
+          chance = true;
+          rebound = true;
+          return true;
+        }
+        const def = nearestOpponent(oppSide, 88, 50, (e) => e.slot.role !== 'GK');
+        turnover(oppSide, def);
+        return false;
+      };
 
       if (rng() >= onTarget) {
         const over = rng() < (kind === 'shot' || kind === 'penalty' ? 0.3 : 0.5);
         const aimY = over ? 40 + rng() * 20 : rng() < 0.5 ? 30 + rng() * 7 : 63 + rng() * 7;
         const deflected = kind !== 'penalty' && rng() < (kind === 'freekick' ? 0.3 : 0.22);
+        // off the post / the bar: the ball stays in play
+        if (!deflected && rng() < 0.06) {
+          st.woodwork++;
+          const woodwork = over || rng() < 0.35 ? 'bar' : 'post';
+          events.push({ ...base, type: 'miss', aimY: woodwork === 'bar' ? 42 + rng() * 16 : (aimY < 50 ? 38 : 62), woodwork });
+          secondBall(0.45);
+          return;
+        }
         events.push({ ...base, type: 'miss', aimY, over: over && !deflected, deflected });
         if (deflected) setPiece = { type: 'corner', side };
         else restart(oppSide, gkIdx, 'goalkick');
@@ -324,6 +377,13 @@
       }
       st.onTarget++;
       if (rng() < pGoal) {
+        // the flag was up: through on goal, but from an offside position
+        if (wasInBehind && rng() < 0.1) {
+          st.shots--; st.onTarget--; st.xg -= xg; st.offsides++;
+          events.push({ ...base, type: 'nogoal', reason: 'offside' });
+          setPiece = { type: 'freekick', side: oppSide, x: 22, y: 100 - (T[side].lineup[idx].slot.y), direct: false };
+          return;
+        }
         st.goals++;
         score[side]++;
         events.push({ ...base, type: 'goal', assist: kind === 'penalty' || kind === 'freekick' ? null : lastPasser, score: { ...score } });
@@ -331,8 +391,12 @@
       } else {
         const caught = rng() < 0.55;
         events.push({ ...base, type: 'save', keeper: gkIdx, caught });
-        if (!caught && rng() < 0.5) setPiece = { type: 'corner', side };
-        else restart(oppSide, gkIdx, 'gkball');
+        if (caught) { restart(oppSide, gkIdx, 'gkball'); return; }
+        // parried: behind for a corner, or loose in the box
+        const r = rng();
+        if (r < 0.4) setPiece = { type: 'corner', side };
+        else if (r < 0.62) restart(oppSide, gkIdx, 'gkball'); // gathered at the second attempt
+        else secondBall(0.5);
       }
     }
 
@@ -486,7 +550,7 @@
         if (bi < 0) return;
         const inP = t.bench.splice(bi, 1)[0];
         const outP = tired.e.player;
-        t.lineup[tired.i] = { player: inP, slot: tired.e.slot, energy: 100 };
+        t.lineup[tired.i] = { player: inP, slot: tired.e.slot, energy: 100, form: formOf(inP.id) };
         t.booked.delete(tired.i); // the booking leaves with the player
         t.subs++;
         events.push({ type: 'sub', side: s, i: tired.i, out: outP.id, in: inP.id, minute: Math.floor(minute) });
@@ -536,7 +600,9 @@
       const carried = carry.key === side + holder ? carry : { adv: 0, n: 0 };
       const depth = Math.min(92, h.slot.x + carried.adv);
       const isGK = h.slot.role === 'GK';
-      const men = MENTALITY[team.tac.mentality];
+      const base = MENTALITY[team.tac.mentality];
+      const gs = gameState(side);
+      const men = { ...base, shoot: base.shoot * gs.shoot, forward: base.forward * gs.forward };
       const sty = STYLE[team.tac.style];
 
       // --- Shot decision -------------------------------------------------
@@ -697,6 +763,8 @@
       if (kind === 'short') p += sty.short;
       if (t.x >= 60 && kind !== 'cross') p -= 0.1;
       if (t.x < 45) p += PRESS[T[oppSide].tac.press].ownHalf;
+      // the side chasing the game hunts the ball; the side ahead is happy to give it up and regroup
+      p -= gameState(oppSide).exposed * 0.012;
       if (countering) p += 0.05;
       p += space;
       p += menDown(oppSide) * 0.03 - menDown(side) * 0.02;
@@ -709,8 +777,23 @@
       const pSuccess = clamp(p, 0.35, 0.96);
 
       stats[side].passes++;
-      minute += 0.28 + rng() * 0.22 + (kind === 'short' || kind === 'through' ? 0 : 0.1);
+      minute += 0.28 + rng() * 0.22 + (kind === 'short' || kind === 'through' ? 0 : 0.1) + gs.waste;
       if (counterLeft > 0) counterLeft--;
+
+      // a run in behind (through ball / ball over the top to an attacker) may be flagged offside;
+      // clever movers time it better, a high defensive line catches more
+      const runner = (kind === 'through' || kind === 'long') && t.x >= 58 && target.e.slot.role !== 'DEF';
+      if (runner) {
+        const oppTac = T[oppSide].tac;
+        const line = (oppTac.mentality === 'attacking' ? 1.35 : oppTac.mentality === 'defensive' ? 0.75 : 1) * (oppTac.press === 'high' ? 1.3 : 1);
+        const pOff = (kind === 'through' ? 0.13 : 0.09) * line * clamp(1 - (eff(target.e, 'att') - 78) / 50, 0.65, 1.3);
+        if (rng() < pOff) {
+          stats[side].offsides++;
+          events.push({ type: 'offside', side, from: holder, to: target.i, kind, minute: Math.floor(minute) });
+          setPiece = { type: 'freekick', side: oppSide, x: clamp(100 - t.x, 8, 40), y: 100 - t.y, direct: false };
+          continue;
+        }
+      }
 
       if (rng() < pSuccess) {
         stats[side].completed++;
@@ -730,6 +813,7 @@
         if (kind === 'through' && t.x >= 60) {
           carry = { key: side + target.i, adv: Math.max(0, 76 - t.x), n: 1 };
           chance = true;
+          inBehind = true;
         }
         fromCross = kind === 'cross';
         maybeFoul(target.i, t);
@@ -765,7 +849,7 @@
 
     const ratings = rateMatch(events, startIds, score);
     return {
-      events, score, stats, seed, ratings, referee,
+      events, score, stats, seed, ratings, referee, form,
       subs: { home: T.home.subs, away: T.away.subs },
       sentOff: { home: [...T.home.off], away: [...T.away.off] },
     };

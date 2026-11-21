@@ -334,3 +334,73 @@ test('each match has a referee; cards are realistic and depend on how strict he 
   // the same seed always gets the same referee
   assert.deepEqual(simulate(strong, weaker, 7).referee, simulate(strong, weaker, 7).referee);
 });
+
+// ---------- realism pack: offside, woodwork & rebounds, game state, form, xG ----------
+const many = (n, fn, home = strong, away = weaker) => { for (let s = 1; s <= n; s++) fn(simulate(home, away, s), s); };
+
+test('offside: runs are flagged now and then, and play restarts with a free kick to the defenders', () => {
+  let flags = 0; let ruledOut = 0; const N = 300;
+  many(N, (r, s) => r.events.forEach((e, i) => {
+    if (e.type === 'offside') {
+      flags++;
+      const nx = r.events[i + 1];
+      assert.equal(nx.type, 'freekick', `seed ${s}: offside then ${nx.type}`);
+      assert.notEqual(nx.side, e.side, `seed ${s}: free kick goes to the defending side`);
+    }
+    if (e.type === 'nogoal') ruledOut++;
+  }));
+  assert.ok(flags / N > 1 && flags / N < 5, `offsides per match ${flags / N}`);
+  assert.ok(ruledOut / N > 0.03 && ruledOut / N < 0.35, `goals ruled out per match ${ruledOut / N}`);
+  many(50, (r) => {
+    const goals = r.events.filter((e) => e.type === 'goal');
+    assert.equal(goals.filter((g) => g.side === 'home').length, r.score.home, 'ruled-out goals do not count');
+  });
+});
+
+test('woodwork and rebounds: shots hit the frame, parries and posts give second chances', () => {
+  let wood = 0; let rebounds = 0; let reboundGoals = 0; const N = 300;
+  many(N, (r) => r.events.forEach((e) => {
+    if (e.type === 'miss' && e.woodwork) wood++;
+    if (isShot(e) && e.rebound) { rebounds++; if (e.type === 'goal') reboundGoals++; }
+  }));
+  assert.ok(wood / N > 0.3 && wood / N < 1.4, `woodwork per match ${wood / N}`);
+  assert.ok(rebounds / N > 0.4, `rebound shots per match ${rebounds / N}`);
+  assert.ok(reboundGoals / N > 0.05, `rebound goals per match ${reboundGoals / N}`);
+});
+
+test('game state: a team chasing the game late attacks more, a team protecting a lead sits back', () => {
+  let trailingLate = 0; let leadingLate = 0;
+  // equal sides, so being ahead does not just mean being the better team
+  many(500, (r) => {
+    const sc = { home: 0, away: 0 };
+    r.events.forEach((e) => {
+      if (e.type === 'half') return;
+      if (isShot(e) && e.minute >= 70 && e.kind !== 'penalty') {
+        const diff = sc[e.side] - sc[e.side === 'home' ? 'away' : 'home'];
+        if (diff < 0) trailingLate++;
+        if (diff > 0) leadingLate++;
+      }
+      if (e.type === 'goal') sc[e.side]++;
+    });
+  }, strong, strong);
+  assert.ok(trailingLate > leadingLate * 1.3, `late shots: trailing ${trailingLate} vs leading ${leadingLate}`);
+});
+
+test('form on the day: players vary from match to match, the same seed gives the same form', () => {
+  const a = simulate(strong, weaker, 11).form;
+  const b = simulate(strong, weaker, 12).form;
+  assert.ok(a && Object.keys(a).length >= 22);
+  assert.deepEqual(a, simulate(strong, weaker, 11).form);
+  assert.notDeepEqual(a, b);
+  Object.values(a).forEach((f) => assert.ok(f >= 0.9 && f <= 1.1, `form ${f}`));
+});
+
+test('xG is recorded for every shot and adds up to a sensible match total', () => {
+  let xg = 0; let goals = 0; const N = 300;
+  many(N, (r) => {
+    r.events.filter(isShot).forEach((e) => assert.ok(e.xg > 0 && e.xg < 1, `xg ${e.xg}`));
+    xg += r.stats.home.xg + r.stats.away.xg;
+    goals += r.score.home + r.score.away;
+  });
+  assert.ok(Math.abs(xg - goals) / goals < 0.15, `xG ${(xg / N).toFixed(2)} vs goals ${(goals / N).toFixed(2)} per match`);
+});

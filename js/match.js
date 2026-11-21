@@ -33,6 +33,27 @@
     throw: { air: true, peak: 0.06 },
   };
   const SHOT_KO = { shot: '슛', long: '중거리 슛', header: '헤딩', freekick: '프리킥', penalty: '페널티킥' };
+  const pick = (a) => a[Math.floor(Math.random() * a.length)];
+  // A few ways of saying each thing, so the log does not read like a machine.
+  // {p} shooter, {k} keeper, {s} kind of shot (슛 / 헤딩 / …)
+  const SAY = {
+    wide: ['{p}의 {s}이 빗나감', '{p}의 {s}, 골문을 살짝 벗어남', '{p}, 골대 옆으로 흘러나가는 {s}', '{p}의 {s} — 아쉽게 빗나감'],
+    over: ['{p}의 {s}이 크로스바 위로', '{p}, 하늘로 날려버린 {s}', '{p}의 {s}이 높게 뜸'],
+    deflected: ['{p}의 {s}이 수비 맞고 굴절', '{p}의 {s}, 몸을 던진 수비에 막힘'],
+    caught: ['{p}의 {s} — {k} 캐치', '{k}, {p}의 {s}을 안정적으로 잡아냄', '{p}의 {s}, {k} 정면'],
+    parried: ['{p}의 {s} — {k} 선방!', '{k}, {p}의 {s}을 쳐냄!', '{k}의 다이빙 세이브! {p}의 {s}'],
+    post: ['{p}의 {s}이 골대를 맞음!', '골대! {p}의 {s}이 포스트를 때림', '{p}, 골대 불운!'],
+    bar: ['{p}의 {s}이 크로스바를 강타!', '크로스바! {p}의 {s}', '{p}의 {s}, 크로스바 맞고 튕겨나옴'],
+    rebound: ['세컨드볼을 {p}가 다시 슛', '흘러나온 공 — {p}'],
+  };
+  const say = (kind, v) => pick(SAY[kind]).replace('{p}', v.p || '').replace('{k}', v.k || '').replace('{s}', v.s || '슛');
+  // Whoever plays the ball next in the engine's story (to send them onto a loose ball).
+  const nextTaker = (next) => {
+    if (!next || !next.side) return null;
+    if (next.from !== undefined && ['pass', 'intercept', 'dribble', 'offside', 'goal', 'save', 'miss', 'nogoal'].includes(next.type)) return key(next.side, next.from);
+    if (next.holder !== undefined && ['gkball', 'goalkick'].includes(next.type)) return key(next.side, next.holder);
+    return null;
+  };
   const MENT_SHIFT = { defensive: -4, balanced: 0, attacking: 4 };
   const PRESS_SHIFT = { low: -7, mid: 0, high: 6 };
 
@@ -373,6 +394,7 @@
     }
   }
 
+  let lastTension = 0;
   function frame(now, gen) {
     if (gen !== rafGen) return;
     // rAF timestamps can be slightly earlier than performance.now() taken in start(): never go back in time
@@ -392,6 +414,15 @@
     timers = timers.filter((t) => t.at > simT);
     due.forEach((t) => t.resolve());
     draw();
+    // the crowd gets louder as an attack nears the box
+    if (now - lastTension > 400) {
+      lastTension = now;
+      const S = live.possession;
+      if (S && ball.alpha) {
+        const depth = Math.abs(ball.p.x - goalLineX(other(S)) ) / W; // 0 own goal .. 1 opponent goal
+        Sound.tension(clamp((depth - 0.55) / 0.35, 0, 1));
+      }
+    }
     requestAnimationFrame((t) => frame(t, gen));
   }
 
@@ -728,7 +759,7 @@
     if (ev.type === 'miss' && ev.over) opts.h1 = rand(2.7, 4.2);
     if (ball.holder) ball.holder = null;
 
-    const reach = ev.type === 'save' ? 1 : ev.type === 'goal' ? rand(0.4, 0.75) : 0.3;
+    const reach = ev.type === 'save' ? 1 : ev.type === 'goal' || ev.type === 'nogoal' ? rand(0.4, 0.75) : 0.3;
     const diveY = gk.p.y + (gy - gk.p.y) * reach;
     const run = runId;
     if (!skipping) {
@@ -751,12 +782,37 @@
         await kick(loose, { air: true, T: 0.5, peakAbs: 1.2, h1: 0, then: { mode: 'dead' } });
         gk.el.classList.remove('is-dive-l', 'is-dive-r');
         if (!toCorner) {
+          // loose ball: the keeper scrambles, but whoever the engine says gets there first, does
+          const taker = nextTaker(next) || gkK;
+          const tk = agents[taker];
           gk.ov = { t: loose, spd: 'sprint' };
-          await simWait(0.9);
-          holdBy(gkK);
+          if (tk && taker !== gkK) {
+            tk.ov = { t: loose, spd: 'sprint' };
+            await arrive(tk, loose, 0, 3);
+            gk.ov = null;
+            tk.ov = null;
+          } else await simWait(0.9);
+          holdBy(taker);
         } else ball.alpha = 0;
       } else holdBy(gkK);
-    } else if (ev.type === 'goal') {
+    } else if (ev.woodwork) {
+      // off the frame and back into the box, to whoever wins the second ball
+      const post = ev.woodwork === 'post'
+        ? { x: lineX, y: H / 2 + (gy < H / 2 ? -3.66 : 3.66) }
+        : { x: lineX, y: clamp(gy, H / 2 - 3.2, H / 2 + 3.2) };
+      await kick(post, { ...opts, h1: ev.woodwork === 'bar' ? 2.44 : rand(0.3, 1.8), then: { mode: 'dead' } });
+      Sound.post();
+      const back = inPitch({ x: lineX - dirOf(S) * rand(6, 13), y: H / 2 + rand(-9, 9) });
+      await kick(back, { air: true, T: 0.6, h0: ball.h, h1: 0, peakAbs: ev.woodwork === 'bar' ? 2.5 : 0.8, then: { mode: 'dead' }, silent: true });
+      const taker = nextTaker(next);
+      const tk = taker && agents[taker];
+      if (tk) {
+        tk.ov = { t: back, spd: 'sprint' };
+        await arrive(tk, back, 0, 3);
+        tk.ov = null;
+        holdBy(taker);
+      }
+    } else if (ev.type === 'goal' || ev.type === 'nogoal') {
       await kick(target, { ...opts, then: { mode: 'dead' } });
       const net = { x: lineX + dirOf(S) * 1.5, y: gy + rand(-0.6, 0.6) };
       await kick(net, { air: true, T: 0.16, h0: ball.h, h1: Math.max(0.2, ball.h * 0.5), peakAbs: 0, then: { mode: 'dead' }, silent: true });
@@ -1079,7 +1135,7 @@
         await doShot(ev);
         live.score = { ...ev.score };
         setScore();
-        const how = ev.kind === 'shot' ? '' : SHOT_KO[ev.kind];
+        const how = [ev.kind === 'shot' ? '' : SHOT_KO[ev.kind], ev.rebound ? '세컨드볼' : ''].filter(Boolean).join(' · ');
         const assist = ev.assist !== null && ev.assist !== undefined ? `도움 ${name(ev.side, ev.assist)}` : '';
         const extra = [how, assist].filter(Boolean).join(', ');
         log(mm(ev), `⚽ 골! ${playerOf(ev.side, ev.from).ko}${extra ? ` (${extra})` : ''}`, ev.side, true);
@@ -1099,17 +1155,64 @@
         pitch.classList.remove('is-goal', 'net-r', 'net-l');
         return undefined;
       }
-      case 'save':
+      case 'save': {
         await doShot(ev, next);
-        log(mm(ev), `${name(ev.side, ev.from)}의 ${SHOT_KO[ev.kind]} — ${name(other(ev.side), ev.keeper)} ${ev.caught ? '캐치' : '선방'}`, ev.side);
+        const v = { p: name(ev.side, ev.from), k: name(other(ev.side), ev.keeper), s: SHOT_KO[ev.kind] };
+        log(mm(ev), (ev.rebound ? '(세컨드볼) ' : '') + say(ev.caught ? 'caught' : 'parried', v), ev.side);
         banner('SAVE!');
         Sound.ooh();
         return simWait(0.6);
-      case 'miss':
-        await doShot(ev);
+      }
+      case 'miss': {
+        await doShot(ev, next);
+        const v = { p: name(ev.side, ev.from), s: SHOT_KO[ev.kind] };
+        if (ev.woodwork) {
+          banner(ev.woodwork === 'bar' ? 'CROSSBAR!' : 'OFF THE POST!', ev.side);
+          Sound.ooh();
+          log(mm(ev), say(ev.woodwork, v), ev.side, true);
+          return simWait(0.2);
+        }
         if (!ev.deflected) Sound.ooh();
-        log(mm(ev), `${name(ev.side, ev.from)}의 ${SHOT_KO[ev.kind]}${ev.deflected ? '이 수비 맞고 굴절' : ev.over ? '이 크로스바 위로' : '이 빗나감'}`, ev.side);
+        log(mm(ev), (ev.rebound ? '(세컨드볼) ' : '') + say(ev.deflected ? 'deflected' : ev.over ? 'over' : 'wide', v), ev.side);
         return simWait(0.6);
+      }
+      case 'nogoal': {
+        // in the net... but the flag is up
+        await doShot(ev, next);
+        const pitch = $('#pitch');
+        pitch.classList.add(ev.side === 'home' ? 'net-r' : 'net-l');
+        Sound.roar();
+        await simWait(1.1);
+        Sound.whistle('short');
+        Sound.groan();
+        banner('NO GOAL — OFFSIDE');
+        log(mm(ev), `🚩 ${playerOf(ev.side, ev.from).ko}의 골 취소 — 오프사이드`, ev.side, true);
+        pitch.classList.remove('net-r', 'net-l');
+        const sp = agents[key(ev.side, ev.from)].p;
+        live.foulSpot = inPitch({ x: goalLineX(ev.side) - dirOf(ev.side) * clamp(Math.abs(goalLineX(ev.side) - sp.x), 6, 16), y: sp.y }, 2);
+        return simWait(1.2);
+      }
+      case 'offside': {
+        // the ball is played in behind, the runner goes, the flag goes up
+        const S = ev.side;
+        const fromK = key(S, ev.from);
+        const toK = key(S, ev.to);
+        live.possession = S;
+        live.kickoff = false;
+        await carry(fromK, S, rand(0.3, 0.8), 6);
+        const r = agents[toK];
+        const prof = PASS[ev.kind] || PASS.short;
+        const A = meetingPoint(r, prof, S);
+        r.ov = { t: A, spd: 'sprint' };
+        await kick(A, { ...prof, then: { mode: 'dead' } });
+        Sound.whistle('short');
+        banner('OFFSIDE');
+        if (Math.random() < 0.7) log(mm(ev), `🚩 ${playerOf(S, ev.to).short} 오프사이드`, S);
+        live.foulSpot = inPitch({ ...r.p }, 2);
+        await simWait(0.7);
+        r.ov = null;
+        return undefined;
+      }
       case 'half':
         clearOverrides();
         live.setPiece = null;
@@ -1183,10 +1286,13 @@
     const rows = [
       ['점유율', pct(h.passes, totalPasses), pct(a.passes, totalPasses)],
       ['슈팅 (유효)', `${h.shots} (${h.onTarget})`, `${a.shots} (${a.onTarget})`],
+      ['기대 득점 (xG)', (h.xg || 0).toFixed(2), (a.xg || 0).toFixed(2)],
       ['패스 성공률', pct(h.completed, h.passes), pct(a.completed, a.passes)],
       ['드리블 (성공)', `${h.dribbles} (${h.dribblesWon})`, `${a.dribbles} (${a.dribblesWon})`],
       ['코너킥', h.corners, a.corners],
       ['프리킥 / PK', `${h.freekicks} / ${h.penalties}`, `${a.freekicks} / ${a.penalties}`],
+      ['오프사이드', h.offsides || 0, a.offsides || 0],
+      ['골대 강타', h.woodwork || 0, a.woodwork || 0],
       ['파울', h.fouls, a.fouls],
       ['경고 / 퇴장', `${h.yellows} / ${h.reds}`, `${a.yellows} / ${a.reds}`],
     ];
@@ -1198,10 +1304,62 @@
       tr.append(mk('td', 'h', String(hv)), mk('th', '', label), mk('td', 'a', String(av)));
       table.append(tr);
     });
+    renderFlow();
     renderRatings(mk);
     showTab('stats');
     $('#result').hidden = false;
     $('#rematch').focus({ preventScroll: true });
+  }
+
+  // Momentum: per 5 minutes, how much danger each side made (xG of its shots plus a little
+  // for corners, dangerous free kicks and offside runs). Home bars up, away bars down, ⚽ at goals.
+  function renderFlow() {
+    const el = $('#res-flow');
+    const BIN = 5;
+    const end = Math.max(90, ...result.events.map((e) => e.minute || 0));
+    const nb = Math.ceil((end + 1) / BIN);
+    const bins = Array.from({ length: nb }, () => ({ home: 0, away: 0 }));
+    const goals = [];
+    let half2 = false;
+    result.events.forEach((e) => {
+      if (e.type === 'half') { half2 = true; return; }
+      if (!e.side) return;
+      // first-half stoppage time is shown at 45'
+      const m = half2 ? e.minute : Math.min(e.minute, 45);
+      const b = bins[Math.min(nb - 1, Math.floor(m / BIN))];
+      if (e.xg) b[e.side] += e.xg;
+      else if (e.type === 'corner') b[e.side] += 0.04;
+      else if (e.type === 'freekick' && e.direct) b[e.side] += 0.05;
+      else if (e.type === 'penalty') b[e.side] += 0.05;
+      else if (e.type === 'offside') b[e.side] += 0.03;
+      if (e.type === 'goal') goals.push({ side: e.side, m });
+    });
+    const max = Math.max(0.4, ...bins.map((b) => Math.max(b.home, b.away)));
+    const Wd = 300; const Hh = 92; const mid = Hh / 2; const amp = mid - 12;
+    const bw = Wd / nb;
+    const esc = (t) => String(t).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+    let svg = `<svg viewBox="0 -4 ${Wd} ${Hh + 14}" role="img" aria-label="경기 흐름: 5분 단위 기대 득점">`;
+    svg += `<line class="flow-grid" x1="${(45 / BIN) * bw}" x2="${(45 / BIN) * bw}" y1="0" y2="${Hh}"/>`;
+    bins.forEach((b, i) => {
+      const x = i * bw + 1;
+      const w = Math.max(1, bw - 2); // 2px gap between bars
+      const tip = `${i * BIN}–${i * BIN + BIN}'  ${teams.home.name} ${b.home.toFixed(2)} · ${teams.away.name} ${b.away.toFixed(2)}`;
+      const hh = (b.home / max) * amp;
+      const ah = (b.away / max) * amp;
+      if (hh > 0.3) svg += `<rect class="flow-bar flow-bar--home" x="${x}" y="${mid - hh}" width="${w}" height="${hh}" rx="1.5"><title>${esc(tip)}</title></rect>`;
+      if (ah > 0.3) svg += `<rect class="flow-bar flow-bar--away" x="${x}" y="${mid}" width="${w}" height="${ah}" rx="1.5"><title>${esc(tip)}</title></rect>`;
+      if (hh <= 0.3 && ah <= 0.3) svg += `<rect x="${x}" y="${mid - amp}" width="${w}" height="${amp * 2}" fill="transparent"><title>${esc(tip)}</title></rect>`;
+    });
+    svg += `<line class="flow-axis" x1="0" x2="${Wd}" y1="${mid}" y2="${mid}"/>`;
+    goals.forEach((g) => {
+      const x = (g.m / (nb * BIN)) * Wd;
+      const y = g.side === 'home' ? 6 : Hh - 1;
+      svg += `<text class="flow-goal" x="${x}" y="${y}" text-anchor="middle">⚽</text>`;
+    });
+    [0, 45, 90].forEach((m) => { svg += `<text class="flow-lbl" x="${Math.min(Wd - 8, (m / (nb * BIN)) * Wd)}" y="${Hh + 9}" text-anchor="middle">${m}'</text>`; });
+    svg += '</svg>';
+    const key = `<span class="flow-key"><i class="flow-sw flow-sw--home"></i>${esc(teams.home.name)} ▲ <i class="flow-sw flow-sw--away"></i>${esc(teams.away.name)} ▼</span>`;
+    el.innerHTML = `<figcaption><span>경기 흐름 · 5분 단위 위협(xG)</span>${key}</figcaption>${svg}`;
   }
 
   // How card-happy the referee is (engine strictness 0.55 .. 1.5).
@@ -1257,6 +1415,7 @@
       b.setAttribute('aria-selected', String(b.dataset.tab === name));
     });
     $('#res-stats').hidden = name !== 'stats';
+    $('#res-flow').hidden = name !== 'stats';
     $('#res-ratings').hidden = name !== 'ratings';
   }
   document.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
