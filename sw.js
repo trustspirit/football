@@ -1,5 +1,5 @@
 // Service worker: offline app shell + cached player photos and fonts.
-const VERSION = 'mdc-v13';
+const VERSION = 'mdc-v14';
 const SHELL = [
   './', 'index.html', 'style.css', 'manifest.webmanifest',
   'js/players.js', 'js/formations.js', 'js/photos.js', 'js/sim.js', 'js/options.js', 'js/sound.js', 'js/match.js', 'js/draft.js',

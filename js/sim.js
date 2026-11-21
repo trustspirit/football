@@ -288,8 +288,9 @@
       let onTarget;
       let pGoal;
       if (kind === 'penalty') {
-        onTarget = clamp(0.86 + (a - 80) / 200, 0.75, 0.95);
-        pGoal = clamp(0.74 + (a - gk) / 120, 0.55, 0.9);
+        // ~78 % scored overall: ~5 % off target, the rest mostly beats the keeper
+        onTarget = clamp(0.93 + (a - 80) / 250, 0.85, 0.97);
+        pGoal = clamp(0.83 + (a - gk) / 140, 0.65, 0.93);
       } else {
         const mod = SHOT_MOD[kind];
         const range = edge ? 0.03 : 0;

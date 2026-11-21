@@ -296,3 +296,19 @@ test('nobody shoots straight from the kick-off', () => {
     });
   }
 });
+
+test('penalties are scored at a realistic rate (~3 in 4), better takers score more', () => {
+  const rate = (home) => {
+    let n = 0; let g = 0;
+    for (let s = 1; s <= 1500; s++) {
+      simulate(home, weaker, s).events.forEach((e) => {
+        if (e.kind === 'penalty' && e.side === 'home' && isShot(e)) { n++; if (e.type === 'goal') g++; }
+      });
+    }
+    return g / n;
+  };
+  const r = rate(strong);
+  assert.ok(r > 0.72 && r < 0.85, `penalty conversion ${(100 * r).toFixed(1)}%`);
+  const poor = strong.map((e) => ({ ...e, player: { ...e.player, sho: 55, fk: 55 } }));
+  assert.ok(rate(poor) < r - 0.05, 'a poor taker converts noticeably less');
+});
